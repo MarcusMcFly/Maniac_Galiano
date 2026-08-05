@@ -2,9 +2,11 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>POC — Free Third-Person Camera (SPEC_01)</title>
 <style>
-  html, body { margin: 0; height: 100%; overflow: hidden; background: #111; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #111; overscroll-behavior: none; }
+  canvas { display: block; touch-action: none; }
   #hud {
     position: fixed; top: 12px; left: 12px; color: #cfe3ff;
     font: 12px/1.5 Consolas, monospace; background: rgba(0,0,0,.55);
@@ -15,11 +17,51 @@
     color: #ddd; font: 13px/1.4 system-ui, sans-serif; background: rgba(0,0,0,.55);
     padding: 8px 16px; border-radius: 8px; pointer-events: none;
   }
+  #ui { position: fixed; inset: 0; pointer-events: none; user-select: none; -webkit-user-select: none; }
+  #joy {
+    position: absolute; left: 24px; bottom: 24px; width: 124px; height: 124px;
+    border-radius: 50%; background: rgba(255,255,255,.08);
+    border: 2px solid rgba(255,255,255,.25);
+    pointer-events: auto; touch-action: none; display: none;
+  }
+  #joyThumb {
+    position: absolute; left: 50%; top: 50%; width: 52px; height: 52px;
+    border-radius: 50%; background: rgba(255,255,255,.35);
+    transform: translate(-50%,-50%);
+  }
+  #buttons {
+    position: absolute; right: 18px; bottom: 20px; display: flex;
+    flex-direction: column; gap: 10px; align-items: flex-end;
+  }
+  .btn {
+    pointer-events: auto; touch-action: none; cursor: pointer;
+    width: 58px; height: 58px; border-radius: 50%;
+    background: rgba(0,0,0,.45); border: 2px solid rgba(255,255,255,.35);
+    color: #eee; font: 600 11px/1.15 system-ui, sans-serif; text-align: center;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+  }
+  .btn small { opacity: .6; font-size: 10px; font-weight: 400; }
+  .btn.pressed { background: rgba(120,170,255,.6); border-color: #cfe3ff; }
+  @media (max-width: 760px), (pointer: coarse) {
+    #hint { display: none; }
+    #hud { font-size: 10px; padding: 6px 8px; }
+    .btn { width: 64px; height: 64px; }
+  }
 </style>
 </head>
 <body>
 <div id="hud"></div>
-<div id="hint">Click para capturar el ratón · WASD mover · Espacio saltar · E coger/soltar objeto · F abrir/cerrar puertas · Ratón rotar cámara · Rueda zoom · R recentrar · Shift correr · Alt liberar cursor</div>
+<div id="hint">Click para capturar el ratón · WASD mover · Espacio saltar · E coger/soltar objeto · F abrir/cerrar puertas · C modo cámara (TPP/órbita) · Ratón rotar cámara · Rueda zoom · R recentrar · Shift correr · Alt liberar cursor</div>
+
+<div id="ui">
+  <div id="joy"><div id="joyThumb"></div></div>
+  <div id="buttons">
+    <div class="btn" id="btnCam">CÁM<small>C</small></div>
+    <div class="btn" id="btnDoor">PUERTA<small>F</small></div>
+    <div class="btn" id="btnGrab">COGER<small>E</small></div>
+    <div class="btn" id="btnJump">SALTO<small>␣</small></div>
+  </div>
+</div>
 
 <script type="importmap">
 { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
@@ -309,22 +351,48 @@ const camState = {
   recenterFrom: 0, recenterTo: 0, recenterT: 0,
 };
 
-// ---------- Input ----------
+// ---------- Input: teclado ----------
 const keys = {};
 addEventListener('keydown', e => {
   keys[e.code] = true;
+  setBtnPressed(e.code, true);
+  if (e.code === 'Space') e.preventDefault();
+  if (e.repeat) return;
   if (e.code === 'KeyR') startRecenter();
   if (e.code === 'KeyE') toggleGrab();
   if (e.code === 'KeyF') toggleNearestDoor();
-  if (e.code === 'Space') e.preventDefault();
+  if (e.code === 'KeyC') toggleCameraMode();
   if (e.code === 'AltLeft') { document.exitPointerLock(); e.preventDefault(); }
 });
-addEventListener('keyup', e => keys[e.code] = false);
+addEventListener('keyup', e => { keys[e.code] = false; setBtnPressed(e.code, false); });
 
-renderer.domElement.addEventListener('click', () => renderer.domElement.requestPointerLock());
+// ---------- Modos de cámara: TPP ↔ órbita ----------
+// TPP: pointer lock en escritorio, la cámara sigue detrás del personaje.
+// Órbita: sin captura de ratón; gira sola alrededor del personaje y se
+// controla arrastrando (ratón o dedo). La transición es suave porque ambos
+// modos comparten el mismo rig (yaw/pitch/distancia).
+let camMode = 'tpp';
+let mouseDragging = false, userRotating = false;
+
+function toggleCameraMode() {
+  camMode = camMode === 'tpp' ? 'orbit' : 'tpp';
+  if (camMode === 'tpp') startRecenter();        // vuelve suavemente tras el personaje
+  else document.exitPointerLock();
+}
+
+renderer.domElement.addEventListener('click', () => {
+  if (camMode === 'tpp' && matchMedia('(pointer: fine)').matches)
+    renderer.domElement.requestPointerLock();
+});
+renderer.domElement.addEventListener('mousedown', () => {
+  if (camMode === 'orbit') mouseDragging = true;
+});
+addEventListener('mouseup', () => { mouseDragging = false; userRotating = false; });
 
 addEventListener('mousemove', e => {
-  if (document.pointerLockElement !== renderer.domElement) return;
+  const locked = document.pointerLockElement === renderer.domElement;
+  if (!locked && !mouseDragging) return;
+  userRotating = !locked;
   camState.yaw   -= e.movementX * profile.horizontalSensitivity;
   camState.pitch  = THREE.MathUtils.clamp(
     camState.pitch + e.movementY * profile.verticalSensitivity,
@@ -337,6 +405,100 @@ addEventListener('wheel', e => {
     camState.preferredDistance + Math.sign(e.deltaY) * profile.zoomStep,
     profile.minDistance, profile.maxDistance);
 });
+
+// ---------- Input táctil: arrastrar rota la cámara, pellizcar hace zoom ----------
+const joyEl = document.getElementById('joy'), thumbEl = document.getElementById('joyThumb');
+if (matchMedia('(pointer: coarse)').matches) joyEl.style.display = 'block';
+
+let lastTX = 0, lastTY = 0, pinchD = 0;
+const cv = renderer.domElement;
+cv.addEventListener('touchstart', e => {
+  e.preventDefault();
+  joyEl.style.display = 'block';                 // hay pantalla táctil: muestra el joystick
+  if (e.touches.length === 1) { lastTX = e.touches[0].clientX; lastTY = e.touches[0].clientY; }
+  else if (e.touches.length === 2) pinchD = Math.hypot(
+    e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+}, { passive: false });
+cv.addEventListener('touchmove', e => {
+  e.preventDefault();
+  if (e.touches.length === 1) {
+    const t = e.touches[0];
+    camState.yaw   -= (t.clientX - lastTX) * 0.006;
+    camState.pitch  = THREE.MathUtils.clamp(
+      camState.pitch + (t.clientY - lastTY) * 0.005, profile.minPitch, profile.maxPitch);
+    lastTX = t.clientX; lastTY = t.clientY;
+    camState.recentering = false;
+    userRotating = true;
+  } else if (e.touches.length === 2) {
+    const d = Math.hypot(
+      e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+    if (d > 1) {
+      camState.preferredDistance = THREE.MathUtils.clamp(
+        camState.preferredDistance * (pinchD / d), profile.minDistance, profile.maxDistance);
+      pinchD = d;
+    }
+  }
+}, { passive: false });
+cv.addEventListener('touchend', e => {
+  if (e.touches.length === 0) userRotating = false;
+}, { passive: false });
+
+// ---------- Joystick virtual: mover el personaje; toque corto = salto ----------
+const joy = { x: 0, y: 0 };
+let joyId = null, joyT0 = 0, joyMoved = false, jumpQueued = false;
+const JOY_R = 44;
+
+joyEl.addEventListener('touchstart', e => {
+  e.preventDefault();
+  const t = e.changedTouches[0];
+  joyId = t.identifier; joyT0 = performance.now(); joyMoved = false;
+}, { passive: false });
+joyEl.addEventListener('touchmove', e => {
+  e.preventDefault();
+  const r = joyEl.getBoundingClientRect();
+  for (const t of e.changedTouches) {
+    if (t.identifier !== joyId) continue;
+    let dx = (t.clientX - (r.left + r.width / 2)) / JOY_R;
+    let dy = (t.clientY - (r.top + r.height / 2)) / JOY_R;
+    const m = Math.hypot(dx, dy);
+    if (m > 1) { dx /= m; dy /= m; }
+    joy.x = dx; joy.y = dy;
+    if (m > 0.25) joyMoved = true;
+    thumbEl.style.transform =
+      `translate(calc(-50% + ${dx * JOY_R}px), calc(-50% + ${dy * JOY_R}px))`;
+  }
+}, { passive: false });
+const joyRelease = e => {
+  for (const t of e.changedTouches) {
+    if (t.identifier !== joyId) continue;
+    if (!joyMoved && performance.now() - joyT0 < 250) jumpQueued = true;  // tap = salto
+    joyId = null; joy.x = joy.y = 0;
+    thumbEl.style.transform = 'translate(-50%,-50%)';
+  }
+};
+joyEl.addEventListener('touchend', joyRelease, { passive: false });
+joyEl.addEventListener('touchcancel', joyRelease, { passive: false });
+
+// ---------- Botones en pantalla (tocables; se iluminan también con el teclado) ----------
+const btnMap = { Space: 'btnJump', KeyE: 'btnGrab', KeyF: 'btnDoor', KeyC: 'btnCam' };
+function setBtnPressed(code, on) {
+  const id = btnMap[code];
+  if (id) document.getElementById(id).classList.toggle('pressed', on);
+}
+function bindButton(id, down, up) {
+  const el = document.getElementById(id);
+  el.addEventListener('pointerdown', e => {
+    e.preventDefault(); el.classList.add('pressed'); down();
+  });
+  const release = () => { el.classList.remove('pressed'); if (up) up(); };
+  el.addEventListener('pointerup', release);
+  el.addEventListener('pointercancel', release);
+  el.addEventListener('pointerleave', release);
+}
+bindButton('btnJump', () => keys.Space = true, () => keys.Space = false);
+bindButton('btnGrab', () => toggleGrab());
+bindButton('btnDoor', () => toggleNearestDoor());
+bindButton('btnCam',  () => toggleCameraMode());
 
 function startRecenter() {
   camState.recentering = true;
@@ -414,7 +576,8 @@ function setPlayerBox(x, y, z) {
 
 function updatePlayer(dt) {
   // Salto y gravedad, con apoyo sobre el suelo (y = 0) o encima de muebles
-  if (keys.Space && playerGrounded) playerVelY = profile.jumpSpeed;
+  if ((keys.Space || jumpQueued) && playerGrounded) playerVelY = profile.jumpSpeed;
+  jumpQueued = false;
   playerVelY -= profile.gravity * dt;
   const prevY = player.position.y;
   player.position.y += playerVelY * dt;
@@ -438,9 +601,11 @@ function updatePlayer(dt) {
     }
   }
 
-  const v = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0);
-  const h = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0);
-  if (!v && !h) return;
+  // Teclado + joystick virtual (analógico: inclinación parcial = más lento)
+  const v = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0) - joy.y;
+  const h = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0) + joy.x;
+  const mag = Math.min(Math.hypot(h, v), 1);
+  if (mag < 0.05) return;
 
   camera.getWorldDirection(camForward);
   camForward.y = 0; camForward.normalize();
@@ -451,7 +616,8 @@ function updatePlayer(dt) {
     .addScaledVector(camRight, h)
     .normalize();
 
-  const speed = keys.ShiftLeft ? profile.runSpeed : profile.walkSpeed;
+  const run = keys.ShiftLeft || Math.hypot(joy.x, joy.y) > 0.95;  // joystick a tope = correr
+  const speed = (run ? profile.runSpeed : profile.walkSpeed) * mag;
 
   // Rotación gradual hacia la dirección de movimiento (540°/s)
   const targetYaw = Math.atan2(moveDir.x, moveDir.z);
@@ -619,6 +785,10 @@ function animate() {
     camState.yaw = THREE.MathUtils.lerp(camState.recenterFrom, camState.recenterTo, e);
   }
 
+  // Modo órbita: giro automático suave salvo que el usuario esté arrastrando
+  if (camMode === 'orbit' && !userRotating && !camState.recentering)
+    camState.yaw += 0.25 * dt;
+
   // 6. Follow Target con suavizado independiente del framerate (sección 7)
   followTarget.copy(player.position); followTarget.y += 1.4;
   const kFollow = 1 - Math.exp(-profile.followSmoothness * dt);
@@ -647,6 +817,7 @@ function animate() {
   updateWallFading(dt);
 
   hud.textContent =
+    `cámara: ${camMode === 'tpp' ? 'TPP' : 'ÓRBITA'}\n` +
     `yaw: ${THREE.MathUtils.radToDeg(camState.yaw).toFixed(0)}°  ` +
     `pitch: ${THREE.MathUtils.radToDeg(camState.pitch).toFixed(0)}°\n` +
     `dist preferida: ${camState.preferredDistance.toFixed(2)} m\n` +
