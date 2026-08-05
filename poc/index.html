@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>POC — Free Third-Person Camera (SPEC_01)</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #111; }
+  #hud {
+    position: fixed; top: 12px; left: 12px; color: #cfe3ff;
+    font: 12px/1.5 Consolas, monospace; background: rgba(0,0,0,.55);
+    padding: 10px 14px; border-radius: 8px; pointer-events: none; white-space: pre;
+  }
+  #hint {
+    position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%);
+    color: #ddd; font: 13px/1.4 system-ui, sans-serif; background: rgba(0,0,0,.55);
+    padding: 8px 16px; border-radius: 8px; pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<div id="hud"></div>
+<div id="hint">Click para capturar el ratón · WASD mover · Espacio saltar · E coger/soltar objeto · F abrir/cerrar puertas · Ratón rotar cámara · Rueda zoom · R recentrar · Shift correr · Alt liberar cursor</div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+
+// ---------- Configuración (sección 26 de la SPEC) ----------
+const profile = {
+  minDistance: 2.2,
+  maxDistance: 8,
+  defaultDistance: 4.5,
+  minPitch: THREE.MathUtils.degToRad(-15),
+  maxPitch: THREE.MathUtils.degToRad(60),
+  defaultPitch: THREE.MathUtils.degToRad(25),
+  horizontalSensitivity: 0.0025,
+  verticalSensitivity: 0.0020,
+  zoomStep: 0.5,
+  followSmoothness: 12,
+  rotationSmoothness: 14,
+  zoomSmoothness: 10,
+  collisionRadius: 0.25,
+  collisionMargin: 0.15,
+  walkSpeed: 2.2,
+  runSpeed: 3.8,
+  jumpSpeed: 6.0,
+  gravity: 16,
+  grabRange: 1.6,
+  turnSpeed: THREE.MathUtils.degToRad(540),
+  recenterDuration: 0.35,          // s (sección 17)
+  fadeObstructionDelay: 0.15,      // s antes de fundir una pared (sección 12)
+  fadeMinOpacity: 0.22,
+};
+
+// ---------- Escena ----------
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1a2030);
+scene.fog = new THREE.Fog(0x1a2030, 18, 40);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+document.body.appendChild(renderer.domElement);
+
+const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 100);
+
+scene.add(new THREE.AmbientLight(0xbfd4ff, 0.55));
+const sun = new THREE.DirectionalLight(0xfff2dd, 1.1);
+sun.position.set(6, 10, 4);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.left = -15; sun.shadow.camera.right = 15;
+sun.shadow.camera.top = 15; sun.shadow.camera.bottom = -15;
+scene.add(sun);
+
+// ---------- Entorno: residencia — dormitorio (oeste), cocina (noreste), comedor (sureste) ----------
+// Capa 2 = colisión de cámara (sección 28). Paredes interiores marcadas cameraFadeable.
+const CAMERA_COLLISION_LAYER = 2;
+const cameraColliders = [];   // mallas contra las que colisiona la cámara
+const wallBoxes = [];         // AABBs para colisión simple del personaje
+
+const floorMat = new THREE.MeshStandardMaterial({ color: 0x6b5d4f, roughness: 0.9 });
+const wallMat  = new THREE.MeshStandardMaterial({ color: 0x8a94a6, roughness: 0.85 });
+
+const floor = new THREE.Mesh(new THREE.BoxGeometry(24, 0.2, 16), floorMat);
+floor.position.y = -0.1;
+floor.receiveShadow = true;
+scene.add(floor);
+
+function addWall(x, z, w, d, { fadeable = false, h = 3 } = {}) {
+  const mat = wallMat.clone();
+  mat.transparent = true;
+  const wall = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+  wall.position.set(x, h / 2, z);
+  wall.castShadow = wall.receiveShadow = true;
+  wall.userData.cameraFadeable = fadeable;
+  wall.layers.enable(CAMERA_COLLISION_LAYER);
+  scene.add(wall);
+  cameraColliders.push(wall);
+  wallBoxes.push(new THREE.Box3().setFromObject(wall));
+  return wall;
+}
+
+const T = 0.3; // grosor de pared
+// Perímetro (24 × 16 centrado en origen)
+addWall(0, -8, 24 + T, T);            // norte
+addWall(0,  8, 24 + T, T);            // sur
+addWall(-12, 0, T, 16);               // oeste
+addWall( 12, 0, T, 16);               // este
+// Pared divisoria vertical en x = -2 con puerta (hueco z ∈ [-1, 1])
+addWall(-2, -4.5, T, 7,   { fadeable: true });
+addWall(-2,  4.5, T, 7,   { fadeable: true });
+// Pared divisoria horizontal en z = 0 (lado este) con puerta (hueco x ∈ [4, 6])
+addWall(1,  0, 6, T,      { fadeable: true });
+addWall(9,  0, 6, T,      { fadeable: true });
+
+// Mobiliario: cajas con AABB. `cam` = colisiona también la cámara
+// (solo los muebles altos, para que los bajos no hagan saltar la cámara).
+function addBox(x, z, w, h, d, color, { cam = false, y = 0 } = {}) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d),
+    new THREE.MeshStandardMaterial({ color, roughness: 0.7 }));
+  m.position.set(x, y + h / 2, z);
+  m.castShadow = m.receiveShadow = true;
+  if (cam) { m.layers.enable(CAMERA_COLLISION_LAYER); cameraColliders.push(m); }
+  scene.add(m);
+  wallBoxes.push(new THREE.Box3().setFromObject(m));
+  return m;
+}
+
+// — Dormitorio (oeste): litera de 3 pisos, 3 escritorios y 3 armarios —
+for (const yBed of [0.55, 1.45, 2.35]) {
+  addBox(-11.3, -4, 1.0, 0.2, 2.2, 0x8a5a33, { y: yBed });            // somier
+  addBox(-11.3, -4, 0.92, 0.14, 2.05, 0xe4ded1, { y: yBed + 0.2 });   // colchón
+}
+for (const dx of [-0.46, 0.46]) for (const dz of [-1.08, 1.08])
+  addBox(-11.3 + dx, -4 + dz, 0.09, 2.75, 0.09, 0x6e4726);            // postes de la litera
+
+for (const x of [-9.5, -7, -4.5]) {
+  addBox(x, -7.4, 1.6, 0.75, 0.7, 0x9c6b4f);                          // escritorio
+  addBox(x, -6.5, 0.45, 0.48, 0.45, 0x5b4a3a);                        // taburete
+}
+// (los armarios, la nevera y la lavadora son contenedores con puerta, más abajo)
+
+// — Cocina (noreste) —
+addBox(2.5, -7.4, 6, 0.92, 0.7, 0x8d979e);                            // encimera
+addBox(6.2, -7.4, 0.75, 0.95, 0.72, 0x3a3f45);                        // fogones
+addBox(4, -3.5, 2.0, 0.9, 1.0, 0x9c6b4f);                             // isla de trabajo
+
+// — Comedor (sureste): mesa larga para 10 —
+addBox(5, 4, 5.2, 0.78, 1.5, 0x8a5a33, { cam: true });                // mesa
+for (const x of [3, 4, 5, 6, 7]) {
+  addBox(x, 2.8, 0.45, 0.5, 0.45, 0x5b4a3a);                          // 5 taburetes norte
+  addBox(x, 5.2, 0.45, 0.5, 0.45, 0x5b4a3a);                          // 5 taburetes sur
+}
+
+// ---------- Contenedores con puerta (F): armarios, nevera y lavadora ----------
+// Cuerpo hueco de 5 paneles + puerta abatible. La puerta solo colisiona
+// cuando está cerrada: su AABB (liveBox) se vacía al abrirla.
+const containers = [];
+function addContainer(x, z, w, h, d, rotY, { body, front, cam = false, floorY = 0.05 } = {}) {
+  const t = 0.05;                            // grosor de panel
+  const g = new THREE.Group();
+  g.position.set(x, 0, z);
+  g.rotation.y = rotY;                       // rotY 0 → puerta mirando a +z
+  scene.add(g);
+  const mat = new THREE.MeshStandardMaterial({ color: body, roughness: 0.7 });
+  const panel = (px, py, pz, pw, ph, pd) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(pw, ph, pd), mat);
+    m.position.set(px, py, pz);
+    m.castShadow = m.receiveShadow = true;
+    g.add(m);
+    if (cam) { m.layers.enable(CAMERA_COLLISION_LAYER); cameraColliders.push(m); }
+    m.updateWorldMatrix(true, false);
+    wallBoxes.push(new THREE.Box3().setFromObject(m));
+  };
+  panel(0, floorY - t / 2, 0, w, t, d - t);          // suelo interior
+  panel(0, h - t / 2, 0, w, t, d);                   // techo
+  panel(0, h / 2, -d / 2 + t / 2, w, h, t);          // trasera
+  panel(-w / 2 + t / 2, h / 2, 0, t, h, d);          // lateral izquierdo
+  panel( w / 2 - t / 2, h / 2, 0, t, h, d);          // lateral derecho
+  g.updateWorldMatrix(true, true);
+  const outerBox = new THREE.Box3().setFromObject(g); // para saber si un objeto está dentro
+
+  const pivot = new THREE.Group();                    // bisagra en el borde izquierdo
+  pivot.position.set(-w / 2, 0, d / 2 - t / 2);
+  g.add(pivot);
+  const door = new THREE.Mesh(new THREE.BoxGeometry(w - 0.02, h - 0.02, t),
+    new THREE.MeshStandardMaterial({ color: front ?? body, roughness: 0.6 }));
+  door.position.set(w / 2 - 0.01, h / 2, 0);
+  door.castShadow = true;
+  pivot.add(door);
+  if (cam) { door.layers.enable(CAMERA_COLLISION_LAYER); cameraColliders.push(door); }
+  door.updateWorldMatrix(true, false);
+  const closedBox = new THREE.Box3().setFromObject(door);
+  const liveBox = closedBox.clone();
+  wallBoxes.push(liveBox);
+
+  containers.push({
+    pivot, closedBox, liveBox, outerBox, open: false,
+    center: new THREE.Vector3(x, 0, z),
+    dropSpot: new THREE.Vector3(x, floorY + 0.35, z),  // suelta asistida dentro
+  });
+}
+
+for (const x of [-9.5, -7, -4.5])
+  addContainer(x, 7.4, 1.1, 2.1, 0.75, Math.PI, { body: 0x445577, cam: true });     // armarios
+addContainer(10.8, -7.3, 0.85, 1.9, 0.8, 0, { body: 0xcfd6da, cam: true });         // nevera
+addContainer(8.6, -7.4, 0.75, 1.0, 0.75, 0, { body: 0xdfe4e8, front: 0x8d979e, floorY: 0.22 }); // lavadora
+
+function nearestContainer(range) {
+  let best = null;
+  for (const c of containers) {
+    const d = Math.hypot(c.center.x - player.position.x, c.center.z - player.position.z);
+    if (d < range) { range = d; best = c; }
+  }
+  return best;
+}
+
+function toggleNearestDoor() {
+  const c = nearestContainer(1.9);
+  if (!c) return;
+  if (!c.open) {
+    c.open = true;
+    c.liveBox.makeEmpty();                   // la puerta abierta no colisiona
+  } else {
+    // No se puede cerrar si el jugador o un objeto bloquean el hueco
+    setPlayerBox(player.position.x, player.position.y, player.position.z);
+    const blocked = playerBox.intersectsBox(c.closedBox) ||
+      props.some(p => !p.carried && propBoxOf(p).intersectsBox(c.closedBox));
+    if (!blocked) c.open = false;
+  }
+}
+
+function updateDoors(dt) {
+  const k = 1 - Math.exp(-10 * dt);
+  for (const c of containers) {
+    const target = c.open ? -1.9 : 0;        // ~110° hacia fuera
+    c.pivot.rotation.y += (target - c.pivot.rotation.y) * k;
+    if (!c.open && c.pivot.rotation.y > -0.02 && c.liveBox.isEmpty()) {
+      c.pivot.rotation.y = 0;
+      c.liveBox.copy(c.closedBox);           // al quedar cerrada vuelve a colisionar
+    }
+  }
+}
+
+// ---------- Objetos interactuables: empujar, coger (E) y soltar ----------
+const props = [];
+function addProp(mesh, x, z, { shape, radius, halfHeight, y = 0 }) {
+  mesh.position.set(x, y + halfHeight, z);
+  mesh.castShadow = mesh.receiveShadow = true;
+  scene.add(mesh);
+  const p = { mesh, vel: new THREE.Vector3(), shape, radius, halfHeight, carried: false, grounded: false };
+  props.push(p);
+  return p;
+}
+addProp(new THREE.Mesh(
+  new THREE.BoxGeometry(0.5, 0.5, 0.5),
+  new THREE.MeshStandardMaterial({ color: 0xc9a227, roughness: 0.55 })),
+  -7, -7.4, { shape: 'box', radius: 0.35, halfHeight: 0.25, y: 0.75 });  // sobre el escritorio central
+addProp(new THREE.Mesh(
+  new THREE.SphereGeometry(0.3, 24, 18),
+  new THREE.MeshStandardMaterial({ color: 0x3fa7d6, roughness: 0.35 })),
+  -6.5, 1, { shape: 'sphere', radius: 0.3, halfHeight: 0.3 });
+addProp(new THREE.Mesh(
+  new THREE.BoxGeometry(0.42, 0.3, 0.42),
+  new THREE.MeshStandardMaterial({ color: 0xb46a8a, roughness: 0.8 })),
+  -7, 7.4, { shape: 'box', radius: 0.3, halfHeight: 0.15, y: 0.05 });    // caja de ropa (armario central)
+addProp(new THREE.Mesh(
+  new THREE.SphereGeometry(0.12, 18, 14),
+  new THREE.MeshStandardMaterial({ color: 0xe8842a, roughness: 0.5 })),
+  10.8, -7.3, { shape: 'sphere', radius: 0.12, halfHeight: 0.12, y: 0.05 }); // naranja (nevera)
+addProp(new THREE.Mesh(
+  new THREE.BoxGeometry(0.24, 0.3, 0.16),
+  new THREE.MeshStandardMaterial({ color: 0x6a5acd, roughness: 0.6 })),
+  8.6, -7.4, { shape: 'box', radius: 0.15, halfHeight: 0.15, y: 0.22 });   // detergente (lavadora)
+
+// ---------- Personaje ----------
+const player = new THREE.Group();
+const body = new THREE.Mesh(
+  new THREE.CapsuleGeometry(0.3, 0.9, 6, 14),
+  new THREE.MeshStandardMaterial({ color: 0xd4593a, roughness: 0.6 }));
+body.position.y = 0.85;
+body.castShadow = true;
+player.add(body);
+const nose = new THREE.Mesh(
+  new THREE.ConeGeometry(0.12, 0.3, 10),
+  new THREE.MeshStandardMaterial({ color: 0xffcf5a }));
+nose.rotation.x = Math.PI / 2;
+nose.position.set(0, 1.3, 0.35);
+player.add(nose);
+player.position.set(-7, 0, 4);
+scene.add(player);
+
+// ---------- Rig de cámara (sección 4) ----------
+// Follow Target (punto de seguimiento a la altura del pecho)
+const followTarget = new THREE.Vector3();
+const smoothedTarget = player.position.clone().setY(1.4);
+
+const camState = {
+  yaw: Math.PI,                        // detrás del personaje al arrancar
+  pitch: profile.defaultPitch,
+  preferredDistance: profile.defaultDistance,  // distancia elegida por el jugador (sección 9)
+  actualDistance: profile.defaultDistance,     // distancia permitida por el entorno
+  recentering: false,
+  recenterFrom: 0, recenterTo: 0, recenterT: 0,
+};
+
+// ---------- Input ----------
+const keys = {};
+addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if (e.code === 'KeyR') startRecenter();
+  if (e.code === 'KeyE') toggleGrab();
+  if (e.code === 'KeyF') toggleNearestDoor();
+  if (e.code === 'Space') e.preventDefault();
+  if (e.code === 'AltLeft') { document.exitPointerLock(); e.preventDefault(); }
+});
+addEventListener('keyup', e => keys[e.code] = false);
+
+renderer.domElement.addEventListener('click', () => renderer.domElement.requestPointerLock());
+
+addEventListener('mousemove', e => {
+  if (document.pointerLockElement !== renderer.domElement) return;
+  camState.yaw   -= e.movementX * profile.horizontalSensitivity;
+  camState.pitch  = THREE.MathUtils.clamp(
+    camState.pitch + e.movementY * profile.verticalSensitivity,
+    profile.minPitch, profile.maxPitch);
+  camState.recentering = false;        // input manual cancela el recentrado
+});
+
+addEventListener('wheel', e => {
+  camState.preferredDistance = THREE.MathUtils.clamp(
+    camState.preferredDistance + Math.sign(e.deltaY) * profile.zoomStep,
+    profile.minDistance, profile.maxDistance);
+});
+
+function startRecenter() {
+  camState.recentering = true;
+  camState.recenterT = 0;
+  camState.recenterFrom = camState.yaw;
+  // Orientación trasera del personaje: yaw de cámara = rotación del personaje + π
+  let target = player.rotation.y + Math.PI;
+  // Camino angular más corto
+  const delta = ((target - camState.yaw + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+  camState.recenterTo = camState.yaw + delta;
+}
+
+// ---------- Colisión de cámara: multi-raycast (sección 10.3) ----------
+const raycaster = new THREE.Raycaster();
+raycaster.layers.set(CAMERA_COLLISION_LAYER);
+const rayOffsets = [
+  new THREE.Vector3(0, 0, 0),
+  new THREE.Vector3(0,  profile.collisionRadius, 0),
+  new THREE.Vector3(0, -profile.collisionRadius, 0),
+];
+const _dir = new THREE.Vector3(), _origin = new THREE.Vector3(), _side = new THREE.Vector3();
+
+function resolveCameraDistance(from, desiredPos) {
+  _dir.subVectors(desiredPos, from);
+  const desired = _dir.length();
+  _dir.normalize();
+  _side.crossVectors(_dir, new THREE.Vector3(0, 1, 0)).normalize()
+       .multiplyScalar(profile.collisionRadius);
+  let allowed = desired;
+  const offsets = [...rayOffsets, _side.clone(), _side.clone().negate()];
+  for (const off of offsets) {
+    _origin.copy(from).add(off);
+    raycaster.set(_origin, _dir);
+    raycaster.far = desired;
+    const hit = raycaster.intersectObjects(cameraColliders, false)[0];
+    if (hit) allowed = Math.min(allowed, hit.distance - profile.collisionMargin);
+  }
+  return Math.max(allowed, 0.4); // nunca dentro del personaje
+}
+
+// ---------- Paredes transparentes (sección 12) ----------
+const obstructionTimers = new Map();
+function updateWallFading(dt) {
+  raycaster.layers.set(CAMERA_COLLISION_LAYER);
+  _dir.subVectors(smoothedTarget, camera.position);
+  const dist = _dir.length();
+  _dir.normalize();
+  raycaster.set(camera.position, _dir);
+  raycaster.far = dist;
+  const hits = new Set(raycaster.intersectObjects(cameraColliders, false).map(h => h.object));
+  for (const mesh of cameraColliders) {
+    if (!mesh.userData.cameraFadeable) continue;
+    const t = (obstructionTimers.get(mesh) ?? 0) + (hits.has(mesh) ? dt : -dt);
+    obstructionTimers.set(mesh, THREE.MathUtils.clamp(t, 0, 0.5));
+    const wantFade = t > profile.fadeObstructionDelay;
+    const targetOpacity = wantFade ? profile.fadeMinOpacity : 1;
+    const k = 1 - Math.exp(-12 * dt);
+    mesh.material.opacity += (targetOpacity - mesh.material.opacity) * k;
+  }
+}
+
+// ---------- Movimiento del personaje relativo a cámara (sección 6) ----------
+const camForward = new THREE.Vector3(), camRight = new THREE.Vector3();
+const moveDir = new THREE.Vector3(), nextPos = new THREE.Vector3();
+const playerBox = new THREE.Box3();
+const PLAYER_RADIUS = 0.35;
+const _pbCenter = new THREE.Vector3(), _pbSize = new THREE.Vector3();
+let playerVelY = 0, playerGrounded = true;
+
+function setPlayerBox(x, y, z) {
+  playerBox.setFromCenterAndSize(
+    _pbCenter.set(x, y + 0.9, z),
+    _pbSize.set(PLAYER_RADIUS * 2, 1.8, PLAYER_RADIUS * 2));
+}
+
+function updatePlayer(dt) {
+  // Salto y gravedad, con apoyo sobre el suelo (y = 0) o encima de muebles
+  if (keys.Space && playerGrounded) playerVelY = profile.jumpSpeed;
+  playerVelY -= profile.gravity * dt;
+  const prevY = player.position.y;
+  player.position.y += playerVelY * dt;
+  playerGrounded = false;
+  if (player.position.y <= 0) {
+    player.position.y = 0; playerVelY = 0; playerGrounded = true;
+  } else {
+    setPlayerBox(player.position.x, player.position.y, player.position.z);
+    for (const b of wallBoxes) {
+      if (!b.intersectsBox(playerBox)) continue;
+      if (playerVelY <= 0 && prevY >= b.max.y - 0.06) {
+        // Aterriza encima del mueble (mesa, encimera, litera…)
+        player.position.y = b.max.y + 0.001;
+        playerVelY = 0; playerGrounded = true;
+      } else {
+        // Golpea con la cabeza o de lado: no atravesar
+        player.position.y = prevY;
+        if (playerVelY > 0) playerVelY = 0;
+      }
+      setPlayerBox(player.position.x, player.position.y, player.position.z);
+    }
+  }
+
+  const v = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0);
+  const h = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0);
+  if (!v && !h) return;
+
+  camera.getWorldDirection(camForward);
+  camForward.y = 0; camForward.normalize();
+  camRight.crossVectors(camForward, player.up).normalize();
+
+  moveDir.set(0, 0, 0)
+    .addScaledVector(camForward, v)
+    .addScaledVector(camRight, h)
+    .normalize();
+
+  const speed = keys.ShiftLeft ? profile.runSpeed : profile.walkSpeed;
+
+  // Rotación gradual hacia la dirección de movimiento (540°/s)
+  const targetYaw = Math.atan2(moveDir.x, moveDir.z);
+  const dYaw = ((targetYaw - player.rotation.y + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+  const maxStep = profile.turnSpeed * dt;
+  player.rotation.y += THREE.MathUtils.clamp(dYaw, -maxStep, maxStep);
+
+  // Colisión simple del personaje por eje (permite deslizarse por paredes)
+  for (const axis of ['x', 'z']) {
+    nextPos.copy(player.position);
+    nextPos[axis] += moveDir[axis] * speed * dt;
+    setPlayerBox(nextPos.x, nextPos.y, nextPos.z);
+    if (!wallBoxes.some(b => b.intersectsBox(playerBox))) {
+      player.position[axis] = nextPos[axis];
+    }
+  }
+}
+
+// ---------- Coger / soltar y física de los objetos ----------
+let carriedProp = null;
+const _sep = new THREE.Vector3(), _rollAxis = new THREE.Vector3();
+const propBox = new THREE.Box3(), _propSize = new THREE.Vector3();
+
+function propBoxOf(p) {
+  _propSize.set(p.radius * 2, p.halfHeight * 2, p.radius * 2);
+  return propBox.setFromCenterAndSize(p.mesh.position, _propSize);
+}
+
+function toggleGrab() {
+  if (carriedProp) {
+    const c = nearestContainer(1.3);
+    if (c && c.open) {
+      // Suelta asistida: el objeto se coloca dentro del contenedor abierto
+      carriedProp.mesh.position.copy(c.dropSpot);
+      carriedProp.vel.set(0, 0, 0);
+    } else {
+      // Si el punto de suelta cae dentro de un mueble o pared, suelta a los pies
+      if (wallBoxes.some(b => b.intersectsBox(propBoxOf(carriedProp)))) {
+        carriedProp.mesh.position.set(
+          player.position.x, player.position.y + 1.1, player.position.z);
+      }
+      // Soltar con un pequeño empujón hacia delante
+      carriedProp.vel.set(Math.sin(player.rotation.y), 0, Math.cos(player.rotation.y))
+        .multiplyScalar(2).setY(1.2);
+    }
+    carriedProp.carried = false;
+    carriedProp = null;
+    return;
+  }
+  let best = null, bestD = profile.grabRange;
+  for (const p of props) {
+    // Un objeto dentro de un contenedor cerrado no se puede coger a través de la puerta
+    if (containers.some(c => !c.open && c.outerBox.containsPoint(p.mesh.position))) continue;
+    const d = p.mesh.position.distanceTo(player.position);
+    if (d < bestD) { best = p; bestD = d; }
+  }
+  if (best) { carriedProp = best; best.carried = true; best.vel.set(0, 0, 0); }
+}
+
+function updateProps(dt) {
+  for (const p of props) {
+    if (p.carried) {
+      // Flota delante del personaje y lo acompaña
+      p.mesh.position.set(
+        player.position.x + Math.sin(player.rotation.y) * 0.7,
+        player.position.y + 1.1,
+        player.position.z + Math.cos(player.rotation.y) * 0.7);
+      p.mesh.rotation.set(0, player.rotation.y, 0);
+      continue;
+    }
+
+    // Empujón al caminar contra el objeto: SOLO velocidad — la posición
+    // la resuelve siempre la colisión de abajo, así nunca atraviesa nada
+    _sep.subVectors(p.mesh.position, player.position); _sep.y = 0;
+    const d = _sep.length(), minD = PLAYER_RADIUS + p.radius;
+    if (d < minD && d > 1e-4 && p.mesh.position.y - player.position.y < 1.4) {
+      _sep.divideScalar(d);
+      p.vel.x = _sep.x * 2.5; p.vel.z = _sep.z * 2.5;
+    }
+
+    p.grounded = false;
+    _propSize.set(p.radius * 2, p.halfHeight * 2, p.radius * 2);
+
+    // Eje Y: gravedad, suelo y apoyo sobre muebles (mesas, encimera…)
+    p.vel.y -= profile.gravity * dt;
+    let prev = p.mesh.position.y;
+    p.mesh.position.y += p.vel.y * dt;
+    propBox.setFromCenterAndSize(p.mesh.position, _propSize);
+    for (const b of wallBoxes) {
+      if (!b.intersectsBox(propBox)) continue;
+      if (p.vel.y <= 0 && prev - p.halfHeight >= b.max.y - 0.06) {
+        landProp(p, b.max.y);            // aterriza sobre la cara superior
+      } else {
+        p.mesh.position.y = prev;        // golpea por debajo o de lado
+        p.vel.y = 0;
+      }
+      propBox.setFromCenterAndSize(p.mesh.position, _propSize);
+    }
+    if (p.mesh.position.y <= p.halfHeight) landProp(p, 0);
+
+    // Ejes X y Z contra paredes y muebles (rebote leve)
+    for (const axis of ['x', 'z']) {
+      prev = p.mesh.position[axis];
+      p.mesh.position[axis] += p.vel[axis] * dt;
+      propBox.setFromCenterAndSize(p.mesh.position, _propSize);
+      if (wallBoxes.some(b => b.intersectsBox(propBox))) {
+        p.mesh.position[axis] = prev;
+        p.vel[axis] *= -0.3;
+      }
+    }
+
+    // Fricción al estar apoyado; la esfera rueda según su velocidad
+    if (p.grounded) {
+      const damp = Math.exp(-(p.shape === 'sphere' ? 1.2 : 7) * dt);
+      p.vel.x *= damp; p.vel.z *= damp;
+      if (p.shape === 'sphere') {
+        const speed = Math.hypot(p.vel.x, p.vel.z);
+        if (speed > 0.02) {
+          _rollAxis.set(p.vel.z, 0, -p.vel.x).normalize();
+          p.mesh.rotateOnWorldAxis(_rollAxis, speed * dt / p.radius);
+        }
+      }
+    }
+  }
+
+  // Colisión entre objetos: impulso de separación (n² con n minúsculo — barato)
+  for (let i = 0; i < props.length; i++) for (let j = i + 1; j < props.length; j++) {
+    const a = props[i], b = props[j];
+    if (a.carried || b.carried) continue;
+    if (Math.abs(b.mesh.position.y - a.mesh.position.y) > a.halfHeight + b.halfHeight) continue;
+    _sep.subVectors(b.mesh.position, a.mesh.position); _sep.y = 0;
+    const d = _sep.length(), minD = a.radius + b.radius;
+    if (d < minD && d > 1e-4) {
+      _sep.divideScalar(d).multiplyScalar(Math.min((minD - d) * 10, 1.5));
+      a.vel.x -= _sep.x; a.vel.z -= _sep.z;
+      b.vel.x += _sep.x; b.vel.z += _sep.z;
+    }
+  }
+}
+
+function landProp(p, topY) {
+  p.mesh.position.y = topY + p.halfHeight;
+  p.vel.y = (p.shape === 'sphere' && p.vel.y < -1.5) ? -p.vel.y * 0.45 : 0;
+  p.grounded = true;
+}
+
+// ---------- Bucle principal (orden de actualización, sección 27) ----------
+const clock = new THREE.Clock();
+const desiredPos = new THREE.Vector3();
+const hud = document.getElementById('hud');
+
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 0.05);
+
+  // 1-2. Input y estado
+  updatePlayer(dt);
+  updateProps(dt);
+  updateDoors(dt);
+
+  if (camState.recentering) {
+    camState.recenterT += dt / profile.recenterDuration;
+    if (camState.recenterT >= 1) { camState.recenterT = 1; camState.recentering = false; }
+    const e = camState.recenterT * camState.recenterT * (3 - 2 * camState.recenterT); // smoothstep
+    camState.yaw = THREE.MathUtils.lerp(camState.recenterFrom, camState.recenterTo, e);
+  }
+
+  // 6. Follow Target con suavizado independiente del framerate (sección 7)
+  followTarget.copy(player.position); followTarget.y += 1.4;
+  const kFollow = 1 - Math.exp(-profile.followSmoothness * dt);
+  smoothedTarget.lerp(followTarget, kFollow);
+
+  // 7. Posición ideal de cámara (órbita esférica)
+  const cp = Math.cos(camState.pitch), sp = Math.sin(camState.pitch);
+  desiredPos.set(
+    smoothedTarget.x + camState.preferredDistance * cp * Math.sin(camState.yaw),
+    smoothedTarget.y + camState.preferredDistance * sp,
+    smoothedTarget.z + camState.preferredDistance * cp * Math.cos(camState.yaw));
+
+  // 8. Resolver colisiones → distancia real vs. preferida (secciones 9-10)
+  const allowed = resolveCameraDistance(smoothedTarget, desiredPos);
+
+  // 9. Suavizar zoom/recuperación: acercar rápido, recuperar suave
+  const kZoom = 1 - Math.exp(-(allowed < camState.actualDistance ? 30 : profile.zoomSmoothness) * dt);
+  camState.actualDistance += (Math.min(allowed, camState.preferredDistance) - camState.actualDistance) * kZoom;
+
+  // 10-11. Fundido de paredes y posicionamiento final
+  camera.position.set(
+    smoothedTarget.x + camState.actualDistance * cp * Math.sin(camState.yaw),
+    smoothedTarget.y + camState.actualDistance * sp,
+    smoothedTarget.z + camState.actualDistance * cp * Math.cos(camState.yaw));
+  camera.lookAt(smoothedTarget);
+  updateWallFading(dt);
+
+  hud.textContent =
+    `yaw: ${THREE.MathUtils.radToDeg(camState.yaw).toFixed(0)}°  ` +
+    `pitch: ${THREE.MathUtils.radToDeg(camState.pitch).toFixed(0)}°\n` +
+    `dist preferida: ${camState.preferredDistance.toFixed(2)} m\n` +
+    `dist real:      ${camState.actualDistance.toFixed(2)} m` +
+    (camState.actualDistance < camState.preferredDistance - 0.05 ? '  [colisión]' : '') +
+    (camState.recentering ? '\nrecentrando…' : '') +
+    (carriedProp ? '\nobjeto cogido  [E para soltar]' : '');
+
+  renderer.render(scene, camera);
+}
+animate();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>
