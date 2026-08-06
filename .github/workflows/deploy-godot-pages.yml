@@ -49,6 +49,11 @@ jobs:
           mkdir -p site/poc
           cp -r poc/. site/poc/
 
+      - name: Copiar POC03 (Three.js casa interactiva)
+        run: |
+          mkdir -p site/poc03
+          cp -r poc03threejs/. site/poc03/
+
       - name: Landing con enlaces a ambos POCs
         run: |
           cat > site/index.html <<'EOF'
@@ -63,6 +68,7 @@ jobs:
           <h1>Maniac Galiano</h1>
           <a href="poc/">POC 01 — Three.js (SPEC_01)</a>
           <a href="poc02/">POC 02 — Godot Web (SPEC_02)</a>
+          <a href="poc03/">POC 03 — Casa interactiva Three.js</a>
           </div></body></html>
           EOF
 
