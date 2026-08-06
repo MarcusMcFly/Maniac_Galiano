@@ -1,0 +1,83 @@
+# Despliegue de ambos POCs a GitHub Pages (SPEC_02 WEB-006, REP-003)
+#   /poc/    -> POC 01 Three.js (estático, se copia tal cual)
+#   /poc02/  -> POC 02 Godot Web (exportado en headless con versión pineada)
+name: Deploy POCs to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  GODOT_VERSION: "4.3"   # pineada (REP-003); debe coincidir con las features de project.godot
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Descargar Godot y export templates
+        run: |
+          BASE="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable"
+          curl -sSL -o godot.zip "$BASE/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          unzip -q godot.zip
+          mv "Godot_v${GODOT_VERSION}-stable_linux.x86_64" godot
+          chmod +x godot
+          curl -sSL -o templates.tpz "$BASE/Godot_v${GODOT_VERSION}-stable_export_templates.tpz"
+          mkdir -p "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
+          unzip -q templates.tpz -d /tmp/templates
+          mv /tmp/templates/templates/* "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable/"
+
+      - name: Importar proyecto (genera la caché .godot)
+        run: ./godot --headless --path poc02 --import || true
+
+      - name: Exportar POC02 a Web
+        run: |
+          mkdir -p site/poc02
+          ./godot --headless --path poc02 --export-release "Web" "$GITHUB_WORKSPACE/site/poc02/index.html"
+
+      - name: Copiar POC01 (Three.js, ya estático)
+        run: |
+          mkdir -p site/poc
+          cp -r poc/. site/poc/
+
+      - name: Landing con enlaces a ambos POCs
+        run: |
+          cat > site/index.html <<'EOF'
+          <!DOCTYPE html><html lang="es"><head><meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <title>Maniac Galiano — POCs</title>
+          <style>
+            body{font-family:system-ui;background:#141a26;color:#eee;display:grid;place-items:center;min-height:100vh;margin:0;text-align:center}
+            a{display:block;margin:12px;padding:16px 28px;background:#2a3550;color:#cfe3ff;border-radius:10px;text-decoration:none;font-size:18px}
+            a:hover{background:#39476b}
+          </style></head><body><div>
+          <h1>Maniac Galiano</h1>
+          <a href="poc/">POC 01 — Three.js (SPEC_01)</a>
+          <a href="poc02/">POC 02 — Godot Web (SPEC_02)</a>
+          </div></body></html>
+          EOF
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

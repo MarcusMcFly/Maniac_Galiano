@@ -31,7 +31,7 @@ Controles: WASD · ratón · rueda zoom · R recentrar · E interactuar · I/Tab
 - **Composición por código, no por .tscn**: el blockout y la UI se construyen en `main.gd`/`hud.gd` para que el POC sea revisable y versionable como texto. La migración a PackedScenes/inspector es el paso natural en el editor (§5 queda parcialmente diferido).
 - **Sin GLB ni AnimationTree** (ANIM-001..005): personajes primitivos sin animación esquelética; requiere assets de Blender.
 - **Sin gamepad ni táctil** (INP-003/004): stretch goals pendientes.
-- **Sin CI de despliegue** (WEB-006): el workflow de Pages queda para cuando exista repo remoto.
+- **CI de despliegue** (WEB-006): `.github/workflows/deploy-godot-pages.yml` en la raíz del repo exporta este proyecto con Godot 4.3 pineado y publica `/poc/` y `/poc02/` en GitHub Pages en cada push a `main`.
 - **AudioSnapshot/Theme/settings UI** (§16 UI-003): pendientes de la fase 5.
 
 ## Estructura
