@@ -1,0 +1,25 @@
+; Maniac Galiano — POC02 (SPEC_02) Godot Web vertical slice
+config_version=5
+
+[application]
+
+config/name="Maniac Galiano POC02"
+run/main_scene="res://scenes/main.tscn"
+config/features=PackedStringArray("4.3", "GL Compatibility")
+
+[autoload]
+
+GameState="*res://scripts/game_state.gd"
+SaveService="*res://scripts/save_service.gd"
+
+[display]
+
+window/size/viewport_width=1280
+window/size/viewport_height=720
+window/stretch/mode="disabled"
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+textures/vram_compression/import_etc2_astc=true
