@@ -12,9 +12,7 @@ env:
   GODOT_VERSION: "4.3"   # pineada (REP-003); debe coincidir con las features de project.godot
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write   # necesario para empujar la rama gh-pages
 
 concurrency:
   group: pages
@@ -68,16 +66,11 @@ jobs:
           </div></body></html>
           EOF
 
-      - uses: actions/upload-pages-artifact@v3
+      # Publicación por rama (evita la maquinaria de artefactos de Pages, que
+      # se atascaba en este repo). Añade .nojekyll automáticamente.
+      - name: Publicar en la rama gh-pages
+        uses: peaceiris/actions-gh-pages@v4
         with:
-          path: site
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./site
+          force_orphan: true
