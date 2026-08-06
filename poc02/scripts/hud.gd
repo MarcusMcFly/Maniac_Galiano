@@ -35,6 +35,13 @@ func _ready() -> void:
 	sl.set_anchors_preset(Control.PRESET_CENTER)
 	sl.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	start_overlay.add_child(sl)
+	# El ColorRect consume los clics (mouse_filter STOP): hay que escucharlos aquí,
+	# no en _unhandled_input, que nunca los recibiría.
+	start_overlay.gui_input.connect(func(event: InputEvent) -> void:
+		if event is InputEventMouseButton and event.pressed:
+			start_overlay.visible = false
+			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+			get_tree().call_group("audio_root", "unlock_audio"))   # AUD-001
 
 	prompt = Label.new()
 	prompt.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
@@ -114,6 +121,7 @@ func _build_inspection() -> void:
 	insp_viewport.add_child(light)
 	insp_pivot = Node3D.new()
 	insp_viewport.add_child(insp_pivot)
+	cont.gui_input.connect(_inspection_input)   # el panel consume el ratón: escuchar aquí
 	var hint := Label.new()
 	hint.text = "Arrastra para rotar · E o clic derecho para cerrar"
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -122,10 +130,6 @@ func _build_inspection() -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if start_overlay.visible:
-		if event is InputEventMouseButton and event.pressed:
-			start_overlay.visible = false
-			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
-			get_tree().call_group("audio_root", "unlock_audio")   # AUD-001
 		return
 	if event.is_action_pressed("pause"):
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
