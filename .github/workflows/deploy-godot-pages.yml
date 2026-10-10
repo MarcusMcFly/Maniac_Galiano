@@ -1,6 +1,8 @@
-# Despliegue de ambos POCs a GitHub Pages (SPEC_02 WEB-006, REP-003)
+# Despliegue de los POCs a GitHub Pages (SPEC_02 WEB-006, REP-003)
 #   /poc/    -> POC 01 Three.js (estático, se copia tal cual)
 #   /poc02/  -> POC 02 Godot Web (exportado en headless con versión pineada)
+#   /poc03/  -> POC 03 Three.js casa interactiva (estático)
+#   /poc04CO/-> POC 04 Three.js Cámara del Oro (estático)
 name: Deploy POCs to GitHub Pages
 
 on:
@@ -54,7 +56,12 @@ jobs:
           mkdir -p site/poc03
           cp -r poc03threejs/. site/poc03/
 
-      - name: Landing con enlaces a ambos POCs
+      - name: Copiar POC04 (Three.js Cámara del Oro)
+        run: |
+          mkdir -p site/poc04CO
+          cp -r poc04CO/. site/poc04CO/
+
+      - name: Landing con enlaces a los POCs
         run: |
           cat > site/index.html <<'EOF'
           <!DOCTYPE html><html lang="es"><head><meta charset="utf-8">
@@ -69,6 +76,7 @@ jobs:
           <a href="poc/">POC 01 — Three.js (SPEC_01)</a>
           <a href="poc02/">POC 02 — Godot Web (SPEC_02)</a>
           <a href="poc03/">POC 03 — Casa interactiva Three.js</a>
+          <a href="poc04CO/">POC 04 — Cámara del Oro Three.js</a>
           </div></body></html>
           EOF
 
