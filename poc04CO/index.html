@@ -73,7 +73,7 @@
 <div id="zone"></div>
 <div id="prompt"></div>
 <canvas id="minimap" width="256" height="166"></canvas>
-<div id="hint">Click para capturar el ratón · WASD mover · Espacio saltar · E coger/soltar · F abrir/cerrar puertas, bóvedas y rejas · Q desconectar robot · C modo cámara · Rueda zoom · R recentrar · Shift correr · Alt liberar cursor</div>
+<div id="hint">Click para capturar el ratón · WASD mover · Espacio saltar · E coger/soltar (el lingote se lanza) · F abrir/cerrar puertas, bóvedas y rejas · Q desconectar robot · palanqueta: tocar al robot · C modo cámara · Rueda zoom · R recentrar · Shift correr · Alt liberar cursor</div>
 
 <div id="ui">
   <div id="joy"><div id="joyThumb"></div></div>
@@ -992,7 +992,7 @@ addProp(new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.08, 0.3),
 addProp(new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.42),
   new THREE.MeshStandardMaterial({ color: 0xe8b23a, roughness: 0.45, emissive: 0x3a2a00 })),
   -40.8, -7.0, { shape: 'box', radius: 0.17, halfHeight: 0.06, y: 0.78, name: 'linterna' });
-addProp(new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.07, 1.3),
+const crowbar = addProp(new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.07, 1.3),
   new THREE.MeshStandardMaterial({ color: 0x9aa3ad, metalness: 0.8, roughness: 0.35 })),
   -24.2, -12.6, { shape: 'box', radius: 0.25, halfHeight: 0.04, y: 0, name: 'palanqueta' });
 const accessCard = addProp(new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.02, 0.16),
@@ -1401,6 +1401,11 @@ function propBoxOf(p) {
   return propBox.setFromCenterAndSize(p.mesh.position, _propSize);
 }
 
+// Lanzamiento del lingote: sale a 1,1 m de altura casi recto, así que la
+// distancia decide dónde golpea: hasta ~2,6 m → cabeza, ~2,6–3,5 m → cuerpo,
+// ~3,5–4,4 m → orugas (ya en el suelo, resbalando).
+const THROW = { speed: 7, up: 0.5 };
+
 function toggleGrab() {
   if (carriedProp) {
     const c = nearestOpenable(o => o.dropSpot && o.open);
@@ -1410,10 +1415,13 @@ function toggleGrab() {
     } else {
       if (wallBoxes.some(b => b.intersectsBox(propBoxOf(carriedProp))))
         carriedProp.mesh.position.set(player.position.x, player.position.y + 1.1, player.position.z);
+      // Un lingote se lanza (lingotazo); el resto de objetos se sueltan con un leve impulso.
+      const throwIt = carriedProp.name === 'lingote de oro';
       carriedProp.vel.set(Math.sin(player.rotation.y), 0, Math.cos(player.rotation.y))
-        .multiplyScalar(2).setY(1.2);
+        .multiplyScalar(throwIt ? THROW.speed : 2).setY(throwIt ? THROW.up : 1.2);
+      carriedProp.thrown = throwIt;
     }
-    toast = `Sueltas: ${carriedProp.name}`; toastT = 1.4;
+    toast = carriedProp.thrown ? 'Lanzas el lingote' : `Sueltas: ${carriedProp.name}`; toastT = 1.4;
     carriedProp.carried = false;
     carriedProp = null;
     return;
@@ -1507,17 +1515,37 @@ function updateProps(dt) {
 }
 
 /* ============================================================================
-   ROBOTS SAQUEADORES Y DESCONECTADOR (Q)
+   ROBOTS SAQUEADORES: DESCONECTADOR (Q) Y PALANQUETA (CONTACTO)
    Al abrirse la 2.ª bóveda salta la alarma: cada pocos segundos se abre un
    agujero en el suelo de la cámara del oro, sube un robot, va a un palé, coge
-   un lingote y vuelve a hundirse con él. Con el desconectador en la mano y el
-   robot a menos de ZAP_RANGE, Q lo apaga: suelta el lingote (que queda como
-   objeto cogible) y se queda inerte hasta desvanecerse. Sin violencia.
+   un lingote y vuelve a hundirse con él. Al pararlo suelta el lingote (cogible):
+   - desconectador en la mano + Q a menos de ZAP_RANGE: apagado limpio;
+   - palanqueta en la mano: basta con tocarlo, y el fallo depende de cómo:
+       saltando encima → se le salta el muelle de la cabeza,
+       girando (barrido) → se le atasca la oruga y hace la peonza,
+       de frente → cortocircuito;
+   - lingotazo (lingote lanzado con E): el fallo depende de dónde le da:
+       cabeza → mareado, ve las estrellas,
+       cuerpo → se desmonta en piezas,
+       orugas → resbala y cae de espaldas pataleando.
+   Después el robot inerte se desvanece. Sin violencia.
    ========================================================================== */
 const ROBOT = { speed: 1.25, depth: 1.45, maxActive: 3, loadTime: 1.2 };
 const ZAP_RANGE = 2.0;
-const raid = { active: false, timer: 0, stolen: 0, saved: 0, zapped: 0, spawned: 0 };
-const robots = [], zapFx = [];
+const FAIL_TEXT = {
+  zap: 'Robot desconectado',
+  short: '¡Cortocircuito! Echa humo por las orejas',
+  spring: '¡Boing! Se le ha saltado el muelle de la cabeza',
+  spin: 'Oruga atascada: da vueltas como una peonza y se vuelca',
+  dizzy: '¡Lingotazo en la cabeza! Ve las estrellas',
+  apart: '¡Lingotazo en la barriga! Se desmonta en piezas',
+  beetle: '¡Lingotazo en las orugas! Resbala y cae de espaldas pataleando',
+};
+const FAIL_KIND = { zap: 'zap', short: 'crowbar', spring: 'crowbar', spin: 'crowbar',
+                    dizzy: 'bar', apart: 'bar', beetle: 'bar' };
+const raid = { active: false, timer: 0, stolen: 0, saved: 0, spawned: 0,
+               byKind: { zap: 0, crowbar: 0, bar: 0 }, byFail: Object.fromEntries(Object.keys(FAIL_KIND).map(k => [k, 0])) };
+const robots = [], fx = [];
 let goldLeft = goldXforms.length;
 const _zeroM = new THREE.Matrix4().makeScale(0, 0, 0);
 
@@ -1557,6 +1585,16 @@ const holes = HOLE_SPOTS.map(([x, z]) => {
   return { x, z, g, open: 0, busy: false, routes };
 });
 
+// Muelle helicoidal de altura 1 (se escala en Y) para el fallo de la cabeza.
+const springGeo = (() => {
+  const pts = [];
+  for (let i = 0; i <= 120; i++) {
+    const a = i / 120 * Math.PI * 2 * 7;
+    pts.push(new THREE.Vector3(Math.cos(a) * 0.07, i / 120, Math.sin(a) * 0.07));
+  }
+  return new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 240, 0.012, 6);
+})();
+
 function buildRobot() {
   const g = new THREE.Group();
   const mats = [];
@@ -1570,21 +1608,26 @@ function buildRobot() {
     const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m);
     b.position.set(x, y, z); b.castShadow = true; parent.add(b); return b;
   };
-  box(g, 0.16, 0.18, 0.6, -0.22, 0.09, 0, dark);           // orugas
-  box(g, 0.16, 0.18, 0.6,  0.22, 0.09, 0, dark);
+  const treads = [box(g, 0.16, 0.18, 0.6, -0.22, 0.09, 0, dark),   // orugas
+                  box(g, 0.16, 0.18, 0.6,  0.22, 0.09, 0, dark)];
   const torso = new THREE.Group(); torso.position.y = 0.2; g.add(torso);
   box(torso, 0.5, 0.55, 0.42, 0, 0.3, 0, shell);           // cuerpo
-  box(torso, 0.05, 0.05, 0.28, -0.17, 0.36, 0.3, dark);    // brazos
-  box(torso, 0.05, 0.05, 0.28,  0.17, 0.36, 0.3, dark);
-  box(torso, 0.36, 0.24, 0.3, 0, 0.72, 0, shell);          // cabeza
-  box(torso, 0.28, 0.07, 0.02, 0, 0.74, 0.16, eye);        // visor
+  const arms = [box(torso, 0.05, 0.05, 0.28, -0.17, 0.36, 0.3, dark),   // brazos
+                box(torso, 0.05, 0.05, 0.28,  0.17, 0.36, 0.3, dark)];
+  // Cabeza en su propio grupo, con el origen en su base (y = 0.6 del torso).
+  const head = new THREE.Group(); head.position.y = 0.6; torso.add(head);
+  box(head, 0.36, 0.24, 0.3, 0, 0.12, 0, shell);
+  box(head, 0.28, 0.07, 0.02, 0, 0.14, 0.16, eye);         // visor
   const ant = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.2, 6), dark);
-  ant.position.y = 0.94; torso.add(ant);
+  ant.position.y = 0.34; head.add(ant);
   const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.04, 10, 8), led);
-  bulb.position.y = 1.05; torso.add(bulb);
+  bulb.position.y = 0.45; head.add(bulb);
+  const spring = new THREE.Mesh(springGeo, dark);          // oculto hasta que salta
+  spring.position.y = 0.58; spring.visible = false; torso.add(spring);
   const bar = box(torso, 0.13, 0.1, 0.3, 0, 0.42, 0.38, goldM);   // lingote entre los brazos
   bar.visible = false;
-  return { g, torso, mats, eye, led, bar };
+  g.rotation.order = 'YXZ';                     // los vuelcos (X, Z) son locales al rumbo (Y)
+  return { g, torso, head, spring, treads, arms, mats, eye, led, bar };
 }
 
 function spawnRobot() {
@@ -1595,7 +1638,7 @@ function spawnRobot() {
   const routes = hole.routes.filter(r => r.pallet.bars.length);
   if (!routes.length) return false;
   const route = routes[(Math.random() * routes.length) | 0];
-  const r = { ...buildRobot(), hole, route, state: 'emerge', t: 0, carrying: false };
+  const r = { ...buildRobot(), hole, route, state: 'emerge', t: 0, carrying: false, fail: null, fxT: 0 };
   r.g.position.set(hole.x, -ROBOT.depth, hole.z);
   r.g.rotation.y = Math.atan2(route.x - hole.x, route.z - hole.z);
   scene.add(r.g);
@@ -1609,8 +1652,9 @@ function spawnRobot() {
   return true;
 }
 
-// Robots que aún se pueden desconectar: activos y fuera del agujero lo bastante.
+// Robots que aún se pueden parar: activos y fuera del agujero lo bastante.
 const zappable = r => r.state !== 'off' && r.state !== 'fade' && r.g.position.y > -0.6;
+const robotTool = () => carriedProp === zapper || carriedProp === crowbar ? carriedProp : null;
 function nearestRobot() {
   let best = null, bestD = ZAP_RANGE;
   for (const r of robots) {
@@ -1621,33 +1665,139 @@ function nearestRobot() {
   return best;
 }
 
-function disconnectNearestRobot() {
-  if (carriedProp !== zapper) {
-    toast = 'Necesitas el desconectador en la mano'; toastT = 1.8; return;
+/* ---------- Partículas: anillo del desconectador, chispas y humo ---------- */
+const sparkGeo = new THREE.BoxGeometry(0.03, 0.03, 0.03);
+const smokeGeo = new THREE.SphereGeometry(0.12, 10, 8);
+const ringGeo = new THREE.TorusGeometry(0.5, 0.03, 8, 32);
+function addFx(geo, mat, x, y, z, { vel = null, grav = 0, grow = 0, life = 0.5, rotX = 0 } = {}) {
+  mat.transparent = true;
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.set(x, y, z);
+  mesh.rotation.x = rotX;
+  scene.add(mesh);
+  fx.push({ mesh, vel, grav, grow, life, t: 0 });
+}
+function sparks(x, y, z, n) {
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * Math.PI * 2, s = 1 + Math.random() * 2;
+    addFx(sparkGeo, new THREE.MeshBasicMaterial({ color: Math.random() < 0.5 ? 0xcff6ff : 0xfff1a0 }),
+      x, y, z, { vel: new THREE.Vector3(Math.cos(a) * s, 1.5 + Math.random() * 2.5, Math.sin(a) * s),
+                 grav: 9, life: 0.35 + Math.random() * 0.35 });
   }
-  const r = nearestRobot();
-  if (!r) { toast = 'No hay ningún robot al alcance'; toastT = 1.6; return; }
-  r.state = 'off'; r.t = 0;
+}
+function smokePuff(x, y, z) {
+  addFx(smokeGeo, new THREE.MeshStandardMaterial({ color: 0x6d7076, roughness: 1 }),
+    x + (Math.random() - 0.5) * 0.1, y, z + (Math.random() - 0.5) * 0.1,
+    { vel: new THREE.Vector3((Math.random() - 0.5) * 0.3, 0.7, (Math.random() - 0.5) * 0.3),
+      grow: 1.8, life: 1.6 });
+}
+function updateFx(dt) {
+  for (const f of [...fx]) {
+    f.t += dt;
+    if (f.vel) { f.mesh.position.addScaledVector(f.vel, dt); f.vel.y -= f.grav * dt; }
+    if (f.grow) f.mesh.scale.setScalar(1 + f.t * f.grow);
+    f.mesh.material.opacity = Math.max(0, 1 - f.t / f.life);
+    if (f.t >= f.life) {
+      scene.remove(f.mesh); f.mesh.material.dispose();
+      fx.splice(fx.indexOf(f), 1);
+    }
+  }
+}
+
+function eyesOff(r) {
+  r.dead = true;
   r.eye.emissiveIntensity = 0; r.led.emissiveIntensity = 0;
   r.eye.color.set(0x222222); r.led.color.set(0x222222);
+}
+
+function disconnectNearestRobot() {
+  if (carriedProp === crowbar) { toast = 'Con la palanqueta no hace falta Q: toca al robot'; toastT = 1.8; return; }
+  if (carriedProp !== zapper) { toast = 'Q sirve con el desconectador en la mano'; toastT = 1.8; return; }
+  const r = nearestRobot();
+  if (!r) { toast = 'No hay ningún robot al alcance'; toastT = 1.6; return; }
+  stopRobot(r, 'zap');
+}
+
+// Palanqueta por contacto. Toca el cuerpo del personaje o la propia palanqueta
+// (que se lleva 0,7 m por delante). El giro se mide con la velocidad angular
+// del personaje, que decae en ~0,2 s para dar margen al barrido.
+const CROWBAR = { bodyReach: 0.75, toolReach: 0.5, stompReach: 0.7, spinRate: 4, bounce: 5.5 };
+let _lastYaw = null, spinMeter = 0;
+function crowbarContact(dt) {
+  const yaw = player.rotation.y;
+  if (_lastYaw !== null && dt > 0) {
+    const d = ((yaw - _lastYaw + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+    spinMeter = Math.max(spinMeter * Math.exp(-6 * dt), Math.abs(d) / dt);
+  }
+  _lastYaw = yaw;
+  if (carriedProp !== crowbar) return;
+
+  const pp = player.position, tp = crowbar.mesh.position;
+  const airborne = !playerGrounded && pp.y > 0.25;
+  for (const r of robots) {
+    if (!zappable(r)) continue;
+    const rp = r.g.position;
+    const dBody = Math.hypot(rp.x - pp.x, rp.z - pp.z);
+    if (airborne) {                                  // en el aire solo cuenta caer encima
+      if (playerVelY < 0 && dBody < CROWBAR.stompReach) {
+        stopRobot(r, 'spring');
+        playerVelY = CROWBAR.bounce;                 // rebote sobre la cabeza
+      }
+      continue;
+    }
+    const dTool = Math.hypot(rp.x - tp.x, rp.z - tp.z);
+    if (dBody < CROWBAR.bodyReach || dTool < CROWBAR.toolReach)
+      stopRobot(r, spinMeter > CROWBAR.spinRate ? 'spin' : 'short');
+  }
+}
+
+function stopRobot(r, fail) {
+  r.state = 'off'; r.t = 0; r.fail = fail; r.fxT = 0;
   r.hole.busy = false;                              // el agujero se cierra
-  raid.zapped++;
+  raid.byKind[FAIL_KIND[fail]]++;
+  raid.byFail[fail]++;
+  const p = r.g.position, baseY = Math.max(0, p.y);
+  if (fail === 'zap') {
+    eyesOff(r);
+    addFx(ringGeo, new THREE.MeshBasicMaterial({ color: 0x7fe9ff }), p.x, baseY + 0.7, p.z,
+      { grow: 4, life: 0.45, rotX: Math.PI / 2 });
+  } else {
+    sparks(p.x, baseY + 0.6, p.z, 10);
+  }
+  if (fail === 'dizzy') {                           // estrellas girando sobre la cabeza
+    const m = new THREE.MeshStandardMaterial({ color: 0xffe066, emissive: 0xffc61a, emissiveIntensity: 1.5 });
+    r.mats.push(m);
+    r.stars = new THREE.Group();
+    r.stars.position.y = 1.18;
+    for (let i = 0; i < 3; i++) {
+      const st = new THREE.Mesh(new THREE.OctahedronGeometry(0.055), m);
+      const a = i / 3 * Math.PI * 2;
+      st.position.set(Math.cos(a) * 0.24, 0, Math.sin(a) * 0.24);
+      r.stars.add(st);
+    }
+    r.torso.add(r.stars);
+  } else if (fail === 'apart') {                    // piezas sueltas (en ejes del torso)
+    const R = () => Math.random() - 0.5;
+    r.pieces = [
+      { obj: r.head, vel: new THREE.Vector3(R() * 1.2, 2.8, -0.6), spin: new THREE.Vector3(R() * 8, R() * 6, 6),
+        rest: 0.18, restRot: new THREE.Euler(0, Math.random() * 3, Math.PI / 2) },
+      ...r.arms.map((a, i) => ({ obj: a, vel: new THREE.Vector3((i ? 1 : -1) * 1.3, 1.2, 0.9 + R()),
+        spin: new THREE.Vector3(R() * 10, R() * 10, R() * 10), rest: 0.025,
+        restRot: new THREE.Euler(0, Math.random() * 3, 0) })),
+    ];
+  } else if (fail === 'beetle') {
+    r.slide = 2.4;                                   // resbalón hacia atrás
+  }
+  toast = FAIL_TEXT[fail];
   if (r.carrying) {
     r.carrying = false; r.bar.visible = false;
-    const fx = Math.sin(r.g.rotation.y) * 0.55, fz = Math.cos(r.g.rotation.y) * 0.55;
-    looseBar(r.g.position.x + fx, r.g.position.z + fz, Math.max(0, r.g.position.y) + 0.3);
+    const dx = Math.sin(r.g.rotation.y), dz = Math.cos(r.g.rotation.y);
+    const b = looseBar(p.x + dx * 0.55, p.z + dz * 0.55, baseY + 0.3);
+    if (fail !== 'zap') b.vel.set(dx * 1.6, 3.2, dz * 1.6);   // con el fallo sale despedido
     raid.saved++;
-    toast = 'Robot desconectado: suelta el lingote';
-  } else {
-    toast = 'Robot desconectado';
+    toast += ' · suelta el lingote';
   }
-  toastT = 1.8;
-  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.5, 0.03, 8, 32),
-    new THREE.MeshBasicMaterial({ color: 0x7fe9ff, transparent: true }));
-  ring.rotation.x = Math.PI / 2;
-  ring.position.set(r.g.position.x, Math.max(0, r.g.position.y) + 0.7, r.g.position.z);
-  scene.add(ring);
-  zapFx.push({ mesh: ring, t: 0 });
+  toastT = 2.2;
 }
 
 function turnRobotTo(r, yaw, dt, rate = 10) {
@@ -1668,13 +1818,159 @@ function moveRobotTo(r, x, z, dt) {
 
 function removeRobot(r) {
   scene.remove(r.g);
-  r.g.traverse(o => { if (o.isMesh) o.geometry.dispose(); });
+  r.g.traverse(o => { if (o.isMesh && o.geometry !== springGeo) o.geometry.dispose(); });
   for (const m of r.mats) m.dispose();
   robots.splice(robots.indexOf(r), 1);
 }
 
+/* ---------- Animaciones de parada ---------- */
+const OFF_TIME = 7;          // segundos inerte antes de desvanecerse
+function updateStopped(r, dt) {
+  const p = r.g.position, t = r.t, k = 1 - Math.exp(-5 * dt);
+  r.fxT -= dt;
+  switch (r.fail) {
+    case 'zap':                                      // apagado limpio: cabizbajo
+      p.y += (0 - p.y) * k;
+      r.torso.rotation.x += (0.32 - r.torso.rotation.x) * k;
+      r.torso.position.y += (0.16 - r.torso.position.y) * k;
+      break;
+
+    case 'short':                                    // cortocircuito: tiembla, parpadea, chispas y humo
+      p.y += (0 - p.y) * k;
+      if (t < 2.2) {
+        r.torso.position.x = (Math.random() - 0.5) * 0.04;
+        r.torso.rotation.z = (Math.random() - 0.5) * 0.08;
+        r.eye.emissiveIntensity = Math.random() < 0.45 ? 3.2 : 0;
+        r.led.emissiveIntensity = Math.random() < 0.3 ? 4 : 0;
+        if (r.fxT <= 0) {
+          r.fxT = 0.07;
+          sparks(p.x + (Math.random() - 0.5) * 0.4, p.y + 0.4 + Math.random() * 0.6,
+                 p.z + (Math.random() - 0.5) * 0.4, 2);
+          if (Math.random() < 0.35) smokePuff(p.x, p.y + 1.15, p.z);
+        }
+      } else {
+        if (!r.dead) { eyesOff(r); smokePuff(p.x, p.y + 1.15, p.z); }
+        r.torso.position.x = 0;
+        r.torso.rotation.z += (0.12 - r.torso.rotation.z) * k;   // se queda torcido
+        r.torso.rotation.x += (0.25 - r.torso.rotation.x) * k;
+        if (r.fxT <= 0 && t < 5) { r.fxT = 0.5; smokePuff(p.x, p.y + 1.1, p.z); }  // humea un rato
+      }
+      break;
+
+    case 'spring': {                                 // la cabeza sale disparada sobre un muelle
+      p.y += (0 - p.y) * k;
+      const lift = 0.55 * (1 - Math.exp(-3 * t) * Math.cos(13 * t));   // boing amortiguado
+      r.head.position.y = 0.6 + lift;
+      r.head.rotation.z = 0.55 * (1 - Math.exp(-1.5 * t)) + Math.sin(9 * t) * 0.35 * Math.exp(-1.2 * t);
+      r.head.rotation.x = Math.sin(6 * t) * 0.25 * Math.exp(-1 * t);
+      r.spring.visible = lift > 0.01;
+      r.spring.scale.y = Math.max(0.02, lift + 0.02);
+      r.spring.rotation.z = r.head.rotation.z * 0.5;
+      if (t < 0.8) r.led.emissiveIntensity = Math.sin(t * 40) > 0 ? 4 : 0;   // la antena parpadea
+      else if (!r.dead) eyesOff(r);
+      break;
+    }
+
+    case 'spin': {                                   // oruga atascada: peonza y vuelco
+      if (t < 1.6) {
+        r.g.rotation.y += (2 + 10 * t) * dt;         // ~2,5 vueltas cada vez más rápidas
+        p.y += (0 - p.y) * k;
+        if (r.fxT <= 0) { r.fxT = 0.12; sparks(p.x, p.y + 0.1, p.z, 1); }
+      } else {
+        const s = Math.min(1, (t - 1.6) / 0.45), e = s * s * (3 - 2 * s);
+        if (s >= 1 && !r.tipped) { r.tipped = true; smokePuff(p.x, 0.4, p.z); eyesOff(r); }
+        r.g.rotation.z = e * Math.PI / 2;            // se vuelca de lado
+        p.y = e * 0.3;                               // sin hundirse en el suelo
+        r.treads[1].position.z = r.tipped && t < 4 ? Math.sin(t * 30) * 0.03 : 0;  // la oruga de arriba sigue
+      }
+      break;
+    }
+
+    case 'dizzy': {                                  // mareado: cabeza en molinillo y estrellas
+      p.y += (0 - p.y) * k;
+      const sway = Math.exp(-0.45 * t);
+      r.head.rotation.y += 22 * Math.exp(-0.9 * t) * dt;
+      r.torso.rotation.z = Math.sin(t * 3.2) * 0.16 * sway;
+      r.torso.rotation.x = Math.sin(t * 2.1) * 0.08 * sway;
+      r.stars.rotation.y += 5 * dt;
+      r.stars.visible = t < 5;
+      if (t < 4.5) r.eye.emissiveIntensity = 0.6 + Math.abs(Math.sin(t * 5)) * 1.6;
+      else if (!r.dead) eyesOff(r);
+      break;
+    }
+
+    case 'apart': {                                  // se desmonta: cabeza y brazos al suelo
+      p.y += (0 - p.y) * k;
+      r.torso.position.y += (0.12 - r.torso.position.y) * k;   // el cuerpo se viene abajo
+      const floorY = -r.torso.position.y;
+      for (const pc of r.pieces) {
+        const o = pc.obj, rest = floorY + pc.rest;
+        if (!pc.landed) {
+          o.position.addScaledVector(pc.vel, dt);
+          pc.vel.y -= profile.gravity * dt;
+          o.rotation.x += pc.spin.x * dt; o.rotation.y += pc.spin.y * dt; o.rotation.z += pc.spin.z * dt;
+          if (o.position.y <= rest && pc.vel.y < 0) {
+            o.position.y = rest;
+            pc.vel.y *= -0.3; pc.vel.x *= 0.5; pc.vel.z *= 0.5; pc.spin.multiplyScalar(0.4);
+            if (pc.vel.y < 0.6) pc.landed = true;
+          }
+        } else {                                     // asentarse en el suelo
+          o.position.y = rest;
+          o.rotation.x += (pc.restRot.x - o.rotation.x) * k;
+          o.rotation.z += (pc.restRot.z - o.rotation.z) * k;
+        }
+      }
+      if (t > 1.2 && !r.dead) { eyesOff(r); sparks(p.x, 0.5, p.z, 4); }
+      break;
+    }
+
+    case 'beetle': {                                 // resbala hacia atrás y cae de espaldas
+      if (r.slide > 0.05) {
+        const bx = -Math.sin(r.g.rotation.y) * r.slide * dt, bz = -Math.cos(r.g.rotation.y) * r.slide * dt;
+        _probe.setFromCenterAndSize(_probeC.set(p.x + bx, 0.55, p.z + bz), _probeS);
+        if (wallBoxes.some(b => b.intersectsBox(_probe))) r.slide = 0;
+        else { p.x += bx; p.z += bz; r.slide *= Math.exp(-4 * dt); }
+      }
+      const s = Math.min(1, t / 0.55), e = s * s * (3 - 2 * s);
+      r.g.rotation.x = -e * Math.PI / 2;
+      p.y = e * 0.3;
+      if (s >= 1 && !r.dead) { eyesOff(r); smokePuff(p.x, 0.3, p.z); }
+      const kick = t > 0.5 && t < 4.5 ? Math.sin(t * 16) * 0.45 : 0;    // pataleo de las orugas
+      r.treads[0].rotation.x = kick;
+      r.treads[1].rotation.x = -kick;
+      break;
+    }
+  }
+  if (t > OFF_TIME) {
+    r.state = 'fade'; r.t = 0;
+    for (const m of r.mats) m.transparent = true;
+  }
+}
+
+// Lingote en vuelo contra un robot: la altura relativa del impacto elige el fallo.
+const BAR_HIT = { reach: 0.42, head: 0.8, body: 0.2, slide: 1.5 };
+function thrownBarHits() {
+  for (const pr of props) {
+    if (!pr.thrown) continue;
+    // sigue valiendo mientras resbala por el suelo, hasta que casi se para
+    if (pr.carried || (pr.grounded && Math.hypot(pr.vel.x, pr.vel.z) < BAR_HIT.slide)) { pr.thrown = false; continue; }
+    const bp = pr.mesh.position;
+    for (const r of robots) {
+      if (!zappable(r)) continue;
+      const rp = r.g.position, h = bp.y - rp.y;
+      if (h < -0.1 || h > 1.35 || Math.hypot(bp.x - rp.x, bp.z - rp.z) > BAR_HIT.reach) continue;
+      stopRobot(r, h > BAR_HIT.head ? 'dizzy' : h > BAR_HIT.body ? 'apart' : 'beetle');
+      pr.vel.x *= -0.25; pr.vel.z *= -0.25;          // rebota y cae junto al robot
+      pr.thrown = false;
+      break;
+    }
+  }
+}
+
 function updateRobots(dt) {
   if (!raid.active && secondVault.open) { raid.active = true; raid.timer = 4; }
+  crowbarContact(dt);
+  thrownBarHits();
   if (raid.active && goldLeft > 0) {
     raid.timer -= dt;
     if (raid.timer <= 0) {
@@ -1719,17 +2015,9 @@ function updateRobots(dt) {
           removeRobot(r);
         }
         break;
-      case 'off': {                                    // inerte: sale del agujero y se queda cabizbajo
-        const k = 1 - Math.exp(-5 * dt);
-        p.y += (0 - p.y) * k;
-        r.torso.rotation.x += (0.32 - r.torso.rotation.x) * k;
-        r.torso.position.y += (0.16 - r.torso.position.y) * k;
-        if (r.t > 7) {
-          r.state = 'fade'; r.t = 0;
-          for (const m of r.mats) m.transparent = true;
-        }
+      case 'off':
+        updateStopped(r, dt);
         break;
-      }
       case 'fade':
         for (const m of r.mats) m.opacity = Math.max(0, 1 - r.t / 1.5);
         if (r.t >= 1.5) removeRobot(r);
@@ -1743,15 +2031,7 @@ function updateRobots(dt) {
     h.g.scale.setScalar(Math.max(0.001, h.open));
     h.g.visible = h.open > 0.01;
   }
-  for (const f of [...zapFx]) {
-    f.t += dt;
-    f.mesh.scale.setScalar(1 + f.t * 4);
-    f.mesh.material.opacity = Math.max(0, 1 - f.t / 0.45);
-    if (f.t >= 0.45) {
-      scene.remove(f.mesh); f.mesh.geometry.dispose(); f.mesh.material.dispose();
-      zapFx.splice(zapFx.indexOf(f), 1);
-    }
-  }
+  updateFx(dt);
 }
 
 /* ============================================================================
@@ -1837,6 +2117,14 @@ const zoneEl = document.getElementById('zone');
 const promptEl = document.getElementById('prompt');
 const _sunOff = new THREE.Vector3(9, 18, 7);
 
+function robotStats() {
+  const k = raid.byKind, f = raid.byFail;
+  return `\nrobados: ${raid.stolen} · salvados: ${raid.saved}` +
+    `\ndesconectados: ${k.zap} · palanquetazos: ${k.crowbar} · lingotazos: ${k.bar}` +
+    (k.crowbar ? `\n  palanqueta → frente ${f.short} · salto ${f.spring} · giro ${f.spin}` : '') +
+    (k.bar ? `\n  lingote → cabeza ${f.dizzy} · cuerpo ${f.apart} · orugas ${f.beetle}` : '');
+}
+
 function animate() {
   requestAnimationFrame(animate);
   const dt = Math.min(clock.getDelta(), 0.05);
@@ -1882,14 +2170,16 @@ function animate() {
   // --- Interfaz ---
   zoneEl.textContent = zoneAt(player.position.x, player.position.z);
   const near = nearestOpenable();
-  const nearBot = carriedProp === zapper ? nearestRobot() : null;
+  const nearBot = robotTool() ? nearestRobot() : null;
   if (toastT > 0) {
     toastT -= dt;
     promptEl.style.display = 'block';
     promptEl.textContent = toast;
   } else if (nearBot) {
     promptEl.style.display = 'block';
-    promptEl.textContent = `[Q] Desconectar robot${nearBot.carrying ? ' (lleva un lingote)' : ''}`;
+    promptEl.textContent = (carriedProp === zapper ? '[Q] Desconectar robot'
+      : 'Palanqueta: tócalo de frente, salta encima o gira al pasar') +
+      (nearBot.carrying ? ' (lleva un lingote)' : '');
   } else if (near) {
     promptEl.style.display = 'block';
     promptEl.textContent = `[F] ${near.open ? 'Cerrar' : 'Abrir'} · ${near.label}`;
@@ -1903,7 +2193,7 @@ function animate() {
     `dist real: ${camState.actualDistance.toFixed(2)} m` +
     (camState.actualDistance < camState.preferredDistance - 0.05 ? '  [colisión]' : '') +
     `\nlingotes en custodia: ${goldLeft}` +
-    (raid.active ? `\nrobados: ${raid.stolen} · salvados: ${raid.saved} · robots desconectados: ${raid.zapped}` : '') +
+    (raid.active ? robotStats() : '') +
     (carriedProp ? `\nllevas: ${carriedProp.name}  [E para soltar]` : '');
 
   drawMinimap();

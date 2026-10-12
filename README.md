@@ -48,7 +48,7 @@ Ramales:
 
 `F`: abrir/cerrar. Aviso: `[F] Abrir · <nombre>`.
 `E`: coger objetos.
-`Q`: desconectar robot (hay que llevar el desconectador en la mano).
+`Q`: desconectar robot (con el desconectador en la mano). La palanqueta funciona por contacto.
 La 2.ª bóveda solo se abre llevando la tarjeta de acceso; después queda desbloqueada.
 
 ### Robots saqueadores
@@ -61,7 +61,21 @@ La 2.ª bóveda solo se abre llevando la tarjeta de acceso; después queda desbl
 - Desconectador: está sobre el mostrador del acceso. Con él en la mano y un
   robot a menos de 2 m, `Q` lo apaga: suelta el lingote (cogible) y se desvanece
   a los ~8 s. Botón táctil `DESCON.`
-- HUD: robados · salvados · robots desconectados. Minimapa: robots y agujeros.
+- Palanqueta: está en el suelo del vestíbulo blindado. Con ella en la mano basta
+  con tocar al robot (con el cuerpo o con la palanqueta). El fallo depende de cómo,
+  y el lingote sale despedido:
+  - De frente → cortocircuito: tiembla, el visor parpadea, chispas y humo.
+  - Saltando encima → muelle: la cabeza sale disparada sobre un muelle, rebota y
+    queda colgando; el personaje rebota.
+  - Girando (cambio brusco de dirección al tocarlo, > 4 rad/s) → oruga atascada:
+    gira como una peonza cada vez más rápido y se vuelca.
+- Lingotazo: con un lingote en la mano, `E` lo lanza (recto, a 1,1 m de altura).
+  La distancia decide dónde da y cómo se bloquea el robot:
+  - hasta ~2,6 m → cabeza: mareado, la cabeza gira como un molinillo y ve las estrellas;
+  - ~2,6–3,5 m → cuerpo: se desmonta, la cabeza y los brazos caen al suelo;
+  - ~3,5–4,4 m → orugas (el lingote llega resbalando): resbala y cae de espaldas pataleando.
+- HUD: robados · salvados · desconectados · palanquetazos · lingotazos, con desglose
+  por tipo de golpe. Minimapa: robots y agujeros.
 Hoja abierta no colisiona; no se cierra con jugador u objeto en el hueco.
 
 ### Oro
@@ -88,7 +102,7 @@ Node + three.js con DOM/WebGL simulados, navmesh 2.5D:
 
 - [ ] Revisión visual (luz, materiales, cámaras): sin comprobar.
 - [ ] Cerraduras y puzles sobre `openables` (`label`, `center`, `range`, `open`).
-- [ ] Llaves candidatas: manojo de llaves, tarjeta de acceso, palanqueta, linterna.
+- [ ] Llaves candidatas: manojo de llaves, linterna.
 - [ ] Definir la función del foso de seguridad (no documentada).
 
 ---
