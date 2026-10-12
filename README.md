@@ -48,6 +48,20 @@ Ramales:
 
 `F`: abrir/cerrar. Aviso: `[F] Abrir · <nombre>`.
 `E`: coger objetos.
+`Q`: desconectar robot (hay que llevar el desconectador en la mano).
+La 2.ª bóveda solo se abre llevando la tarjeta de acceso; después queda desbloqueada.
+
+### Robots saqueadores
+
+- Al abrir la 2.ª bóveda salta la alarma.
+- Cada 6–12 s se abre un agujero en el suelo de la cámara del oro (8 posibles,
+  nunca a menos de 2,5 m del jugador) y sube un robot. Máximo 3 a la vez.
+- El robot va en línea recta a un palé, coge un lingote y vuelve a hundirse con él.
+  Rutas precalculadas: solo las que no tocan ningún obstáculo.
+- Desconectador: está sobre el mostrador del acceso. Con él en la mano y un
+  robot a menos de 2 m, `Q` lo apaga: suelta el lingote (cogible) y se desvanece
+  a los ~8 s. Botón táctil `DESCON.`
+- HUD: robados · salvados · robots desconectados. Minimapa: robots y agujeros.
 Hoja abierta no colisiona; no se cierra con jugador u objeto en el hueco.
 
 ### Oro

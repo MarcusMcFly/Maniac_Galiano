@@ -73,12 +73,13 @@
 <div id="zone"></div>
 <div id="prompt"></div>
 <canvas id="minimap" width="256" height="166"></canvas>
-<div id="hint">Click para capturar el ratón · WASD mover · Espacio saltar · E coger/soltar · F abrir/cerrar puertas, bóvedas y rejas · C modo cámara · Rueda zoom · R recentrar · Shift correr · Alt liberar cursor</div>
+<div id="hint">Click para capturar el ratón · WASD mover · Espacio saltar · E coger/soltar · F abrir/cerrar puertas, bóvedas y rejas · Q desconectar robot · C modo cámara · Rueda zoom · R recentrar · Shift correr · Alt liberar cursor</div>
 
 <div id="ui">
   <div id="joy"><div id="joyThumb"></div></div>
   <div id="buttons">
     <div class="btn" id="btnCam">CÁM<small>C</small></div>
+    <div class="btn" id="btnZap">DESCON.<small>Q</small></div>
     <div class="btn" id="btnDoor">ABRIR<small>F</small></div>
     <div class="btn" id="btnGrab">COGER<small>E</small></div>
     <div class="btn" id="btnJump">SALTO<small>␣</small></div>
@@ -747,7 +748,7 @@ wallGap('z', -16.1, -14.5, -11.5, 11.5, -1.6, 1.6, 3.0, { y1: HV });            
 wallGap('z',  14.5,  16.1, -11.5, 11.5,  2.4, 5.6, 3.0, { y1: HV });                // este + servicio
 solid(-16.1, 11.5, 16.1, 13.1, -3.2, 0, matConcrete, { cam: false, map: false, shadow: false }); // muro de contención del foso
 
-addVaultDoor(-15.3, 0, -Math.PI / 2, 1.6, 'Segunda puerta de bóveda', -1, { wallT: TV });
+const secondVault = addVaultDoor(-15.3, 0, -Math.PI / 2, 1.6, 'Segunda puerta de bóveda', -1, { wallT: TV });
 addArmoredDoor(15.3, 4.0, Math.PI / 2, 3.2, 3.0, 'Puerta de la salida de servicio');
 
 // ---- Cámara principal del oro: muros de acero con cuatro rejas ----
@@ -794,11 +795,15 @@ scene.add(puddle);
    ========================================================================== */
 const BAR = { w: 0.30, h: 0.10, d: 0.13 };
 const goldXforms = [], goldTints = [];
+const pallets = [];           // { cx, cz, hw, hd, bars: índices de instancia, de abajo arriba }
 const _dummy = new THREE.Object3D();
 
 function goldPallet(cx, cz, nx, nz, layers) {
   const sx = BAR.w + 0.012, sz = BAR.d + 0.012;
   const W = nx * sx, D = nz * sz, baseH = 0.14;
+
+  const pal = { cx, cz, hw: W / 2 + 0.09, hd: D / 2 + 0.09, bars: [] };
+  pallets.push(pal);
 
   const base = new THREE.Mesh(new THREE.BoxGeometry(W + 0.18, baseH, D + 0.18), matWood);
   base.position.set(cx, baseH / 2, cz);
@@ -816,6 +821,7 @@ function goldPallet(cx, cz, nx, nz, layers) {
         cz - D / 2 + sz * (j + 0.5));
       _dummy.rotation.set(0, (Math.random() - 0.5) * 0.035, 0);
       _dummy.updateMatrix();
+      pal.bars.push(goldXforms.length);
       goldXforms.push(_dummy.matrix.clone());
       goldTints.push(0.86 + Math.random() * 0.26);
     }
@@ -989,9 +995,26 @@ addProp(new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.42),
 addProp(new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.07, 1.3),
   new THREE.MeshStandardMaterial({ color: 0x9aa3ad, metalness: 0.8, roughness: 0.35 })),
   -24.2, -12.6, { shape: 'box', radius: 0.25, halfHeight: 0.04, y: 0, name: 'palanqueta' });
-addProp(new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.02, 0.16),
+const accessCard = addProp(new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.02, 0.16),
   new THREE.MeshStandardMaterial({ color: 0xe0e6ec, roughness: 0.4, emissive: 0x16202b })),
   -19.6, -13.0, { shape: 'box', radius: 0.14, halfHeight: 0.01, y: 0.05, name: 'tarjeta de acceso' });
+// La tarjeta solo abre la 2.ª bóveda; una vez aceptada, la puerta queda desbloqueada.
+secondVault.requires = accessCard;
+// Desconectador de robots: sobre el mostrador del acceso, junto al punto de salida.
+const zapper = (() => {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.09, 0.34),
+    new THREE.MeshStandardMaterial({ color: 0xf0c419, roughness: 0.5 }));
+  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.12, 0.08), matDark);
+  grip.position.set(0, -0.08, -0.1);
+  const tip = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.05, 0.08, 12),
+    new THREE.MeshStandardMaterial({ color: 0x9ff3ff, emissive: 0x2fd3ff, emissiveIntensity: 1.6 }));
+  tip.rotation.x = Math.PI / 2;
+  tip.position.z = 0.2;
+  g.add(body, grip, tip);
+  g.traverse(o => { if (o.isMesh) o.castShadow = true; });
+  return addProp(g, -37.2, -17.6, { shape: 'box', radius: 0.18, halfHeight: 0.06, y: 1.13, name: 'desconectador' });
+})();
 addProp(new THREE.Mesh(new THREE.SphereGeometry(0.16, 20, 14),
   new THREE.MeshStandardMaterial({ color: 0x3fa7d6, roughness: 0.35 })),
   -4, 16.4, { shape: 'sphere', radius: 0.16, halfHeight: 0.16, y: -2.6, name: 'esfera' });
@@ -1053,9 +1076,17 @@ function toggleNearestDoor() {
   const o = nearestOpenable();
   if (!o) { toast = 'No hay nada que abrir aquí'; toastT = 1.6; return; }
   if (!o.open) {
+    if (o.requires) {
+      if (carriedProp !== o.requires) {
+        toast = `${o.label}: bloqueada, hace falta la ${o.requires.name}`; toastT = 2.2; return;
+      }
+      o.requires = null;
+      toast = `Tarjeta aceptada · Abriendo: ${o.label}`;
+    } else {
+      toast = `Abriendo: ${o.label}`;
+    }
     o.open = true;
     o.liveBox.makeEmpty();                       // la hoja abierta deja de colisionar
-    toast = `Abriendo: ${o.label}`;
   } else {
     setPlayerBox(player.position.x, player.position.y, player.position.z);
     const blocked = playerBox.intersectsBox(o.closedBox) ||
@@ -1095,6 +1126,7 @@ addEventListener('keydown', e => {
   if (e.code === 'KeyR') startRecenter();
   if (e.code === 'KeyE') toggleGrab();
   if (e.code === 'KeyF') toggleNearestDoor();
+  if (e.code === 'KeyQ') disconnectNearestRobot();
   if (e.code === 'KeyC') toggleCameraMode();
   if (e.code === 'AltLeft') { document.exitPointerLock(); e.preventDefault(); }
 });
@@ -1192,7 +1224,7 @@ const joyRelease = e => {
 joyEl.addEventListener('touchend', joyRelease, { passive: false });
 joyEl.addEventListener('touchcancel', joyRelease, { passive: false });
 
-const btnMap = { Space: 'btnJump', KeyE: 'btnGrab', KeyF: 'btnDoor', KeyC: 'btnCam' };
+const btnMap = { Space: 'btnJump', KeyE: 'btnGrab', KeyF: 'btnDoor', KeyC: 'btnCam', KeyQ: 'btnZap' };
 function setBtnPressed(code, on) {
   const id = btnMap[code];
   if (id) document.getElementById(id).classList.toggle('pressed', on);
@@ -1208,6 +1240,7 @@ function bindButton(id, down, up) {
 bindButton('btnJump', () => keys.Space = true, () => keys.Space = false);
 bindButton('btnGrab', () => toggleGrab());
 bindButton('btnDoor', () => toggleNearestDoor());
+bindButton('btnZap', () => disconnectNearestRobot());
 bindButton('btnCam', () => toggleCameraMode());
 
 function startRecenter() {
@@ -1474,6 +1507,254 @@ function updateProps(dt) {
 }
 
 /* ============================================================================
+   ROBOTS SAQUEADORES Y DESCONECTADOR (Q)
+   Al abrirse la 2.ª bóveda salta la alarma: cada pocos segundos se abre un
+   agujero en el suelo de la cámara del oro, sube un robot, va a un palé, coge
+   un lingote y vuelve a hundirse con él. Con el desconectador en la mano y el
+   robot a menos de ZAP_RANGE, Q lo apaga: suelta el lingote (que queda como
+   objeto cogible) y se queda inerte hasta desvanecerse. Sin violencia.
+   ========================================================================== */
+const ROBOT = { speed: 1.25, depth: 1.45, maxActive: 3, loadTime: 1.2 };
+const ZAP_RANGE = 2.0;
+const raid = { active: false, timer: 0, stolen: 0, saved: 0, zapped: 0, spawned: 0 };
+const robots = [], zapFx = [];
+let goldLeft = goldXforms.length;
+const _zeroM = new THREE.Matrix4().makeScale(0, 0, 0);
+
+// Agujeros en pasillos libres de la cámara. Las rutas agujero → palé se
+// calculan una vez: solo valen las que van en línea recta sin tocar nada.
+const HOLE_SPOTS = [[-6.5, 0], [6.5, 0], [0, -3.5], [0, 3.5],
+                    [-6.6, -6.6], [6.6, 6.6], [-3.5, 6.6], [3.5, -6.6]];
+const holeRimMat = new THREE.MeshStandardMaterial({ color: 0x3a2412, emissive: 0xff7a2a, emissiveIntensity: 1.2 });
+const holeMat = new THREE.MeshBasicMaterial({ color: 0x020202 });
+const _probe = new THREE.Box3(), _probeC = new THREE.Vector3(), _probeS = new THREE.Vector3(0.6, 1.0, 0.6);
+function pathClear(ax, az, bx, bz) {
+  const n = Math.max(1, Math.ceil(Math.hypot(bx - ax, bz - az) / 0.15));
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    _probe.setFromCenterAndSize(_probeC.set(ax + (bx - ax) * t, 0.55, az + (bz - az) * t), _probeS);
+    if (wallBoxes.some(b => b.intersectsBox(_probe))) return false;
+  }
+  return true;
+}
+const holes = HOLE_SPOTS.map(([x, z]) => {
+  const g = new THREE.Group();
+  const pit = new THREE.Mesh(new THREE.CircleGeometry(0.5, 32), holeMat);
+  const rim = new THREE.Mesh(new THREE.RingGeometry(0.5, 0.6, 32), holeRimMat);
+  for (const m of [pit, rim]) { m.rotation.x = -Math.PI / 2; g.add(m); }
+  rim.position.y = 0.002;
+  g.position.set(x, 0.012, z);
+  g.scale.setScalar(0.001);
+  g.visible = false;
+  scene.add(g);
+  const routes = [];
+  for (const p of pallets) {
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const sx = p.cx + dx * (p.hw + 0.4), sz = p.cz + dz * (p.hd + 0.4);
+      if (pathClear(x, z, sx, sz)) routes.push({ pallet: p, x: sx, z: sz, face: Math.atan2(-dx, -dz) });
+    }
+  }
+  return { x, z, g, open: 0, busy: false, routes };
+});
+
+function buildRobot() {
+  const g = new THREE.Group();
+  const mats = [];
+  const M = (o) => { const m = new THREE.MeshStandardMaterial(o); mats.push(m); return m; };
+  const shell = M({ color: 0xc7d0da, metalness: 0.55, roughness: 0.38 });
+  const dark = M({ color: 0x2a2f36, roughness: 0.6, metalness: 0.3 });
+  const eye = M({ color: 0x331500, emissive: 0xff6a2a, emissiveIntensity: 2.2 });
+  const led = M({ color: 0x330000, emissive: 0xff3322, emissiveIntensity: 3 });
+  const goldM = M({ color: 0xffc247, metalness: 0.9, roughness: 0.26 });
+  const box = (parent, w, h, d, x, y, z, m) => {
+    const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m);
+    b.position.set(x, y, z); b.castShadow = true; parent.add(b); return b;
+  };
+  box(g, 0.16, 0.18, 0.6, -0.22, 0.09, 0, dark);           // orugas
+  box(g, 0.16, 0.18, 0.6,  0.22, 0.09, 0, dark);
+  const torso = new THREE.Group(); torso.position.y = 0.2; g.add(torso);
+  box(torso, 0.5, 0.55, 0.42, 0, 0.3, 0, shell);           // cuerpo
+  box(torso, 0.05, 0.05, 0.28, -0.17, 0.36, 0.3, dark);    // brazos
+  box(torso, 0.05, 0.05, 0.28,  0.17, 0.36, 0.3, dark);
+  box(torso, 0.36, 0.24, 0.3, 0, 0.72, 0, shell);          // cabeza
+  box(torso, 0.28, 0.07, 0.02, 0, 0.74, 0.16, eye);        // visor
+  const ant = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.2, 6), dark);
+  ant.position.y = 0.94; torso.add(ant);
+  const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.04, 10, 8), led);
+  bulb.position.y = 1.05; torso.add(bulb);
+  const bar = box(torso, 0.13, 0.1, 0.3, 0, 0.42, 0.38, goldM);   // lingote entre los brazos
+  bar.visible = false;
+  return { g, torso, mats, eye, led, bar };
+}
+
+function spawnRobot() {
+  const free = holes.filter(h => !h.busy && h.open < 0.05 &&
+    Math.hypot(h.x - player.position.x, h.z - player.position.z) > 2.5);
+  if (!free.length) return false;
+  const hole = free[(Math.random() * free.length) | 0];
+  const routes = hole.routes.filter(r => r.pallet.bars.length);
+  if (!routes.length) return false;
+  const route = routes[(Math.random() * routes.length) | 0];
+  const r = { ...buildRobot(), hole, route, state: 'emerge', t: 0, carrying: false };
+  r.g.position.set(hole.x, -ROBOT.depth, hole.z);
+  r.g.rotation.y = Math.atan2(route.x - hole.x, route.z - hole.z);
+  scene.add(r.g);
+  hole.busy = true;
+  robots.push(r);
+  raid.spawned++;
+  toast = raid.spawned === 1
+    ? '¡Alarma! Algo perfora el suelo de la cámara del oro'
+    : 'Se abre otro agujero en la cámara del oro';
+  toastT = 2.4;
+  return true;
+}
+
+// Robots que aún se pueden desconectar: activos y fuera del agujero lo bastante.
+const zappable = r => r.state !== 'off' && r.state !== 'fade' && r.g.position.y > -0.6;
+function nearestRobot() {
+  let best = null, bestD = ZAP_RANGE;
+  for (const r of robots) {
+    if (!zappable(r)) continue;
+    const d = Math.hypot(r.g.position.x - player.position.x, r.g.position.z - player.position.z);
+    if (d < bestD && Math.abs(r.g.position.y - player.position.y) < 1.8) { bestD = d; best = r; }
+  }
+  return best;
+}
+
+function disconnectNearestRobot() {
+  if (carriedProp !== zapper) {
+    toast = 'Necesitas el desconectador en la mano'; toastT = 1.8; return;
+  }
+  const r = nearestRobot();
+  if (!r) { toast = 'No hay ningún robot al alcance'; toastT = 1.6; return; }
+  r.state = 'off'; r.t = 0;
+  r.eye.emissiveIntensity = 0; r.led.emissiveIntensity = 0;
+  r.eye.color.set(0x222222); r.led.color.set(0x222222);
+  r.hole.busy = false;                              // el agujero se cierra
+  raid.zapped++;
+  if (r.carrying) {
+    r.carrying = false; r.bar.visible = false;
+    const fx = Math.sin(r.g.rotation.y) * 0.55, fz = Math.cos(r.g.rotation.y) * 0.55;
+    looseBar(r.g.position.x + fx, r.g.position.z + fz, Math.max(0, r.g.position.y) + 0.3);
+    raid.saved++;
+    toast = 'Robot desconectado: suelta el lingote';
+  } else {
+    toast = 'Robot desconectado';
+  }
+  toastT = 1.8;
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.5, 0.03, 8, 32),
+    new THREE.MeshBasicMaterial({ color: 0x7fe9ff, transparent: true }));
+  ring.rotation.x = Math.PI / 2;
+  ring.position.set(r.g.position.x, Math.max(0, r.g.position.y) + 0.7, r.g.position.z);
+  scene.add(ring);
+  zapFx.push({ mesh: ring, t: 0 });
+}
+
+function turnRobotTo(r, yaw, dt, rate = 10) {
+  const dYaw = ((yaw - r.g.rotation.y + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+  r.g.rotation.y += dYaw * (1 - Math.exp(-rate * dt));
+}
+
+function moveRobotTo(r, x, z, dt) {
+  const dx = x - r.g.position.x, dz = z - r.g.position.z, d = Math.hypot(dx, dz);
+  const step = ROBOT.speed * dt;
+  r.torso.position.y = 0.2;
+  if (d <= step) { r.g.position.x = x; r.g.position.z = z; return true; }
+  turnRobotTo(r, Math.atan2(dx, dz), dt);
+  r.g.position.x += dx / d * step; r.g.position.z += dz / d * step;
+  r.torso.position.y += Math.abs(Math.sin(r.t * 9)) * 0.025;     // traqueteo
+  return false;
+}
+
+function removeRobot(r) {
+  scene.remove(r.g);
+  r.g.traverse(o => { if (o.isMesh) o.geometry.dispose(); });
+  for (const m of r.mats) m.dispose();
+  robots.splice(robots.indexOf(r), 1);
+}
+
+function updateRobots(dt) {
+  if (!raid.active && secondVault.open) { raid.active = true; raid.timer = 4; }
+  if (raid.active && goldLeft > 0) {
+    raid.timer -= dt;
+    if (raid.timer <= 0) {
+      const active = robots.filter(r => r.state !== 'off' && r.state !== 'fade').length;
+      if (active < ROBOT.maxActive && spawnRobot()) raid.timer = 6 + Math.random() * 6;
+      else raid.timer = 1.5;
+    }
+  }
+
+  for (const r of [...robots]) {
+    r.t += dt;
+    const p = r.g.position;
+    switch (r.state) {
+      case 'emerge':                                   // el agujero se abre y el robot sube
+        if (r.t > 0.4) p.y = Math.min(0, p.y + ROBOT.depth / 0.8 * dt);
+        if (p.y >= 0) { r.state = 'go'; r.t = 0; }
+        break;
+      case 'go':
+        if (moveRobotTo(r, r.route.x, r.route.z, dt)) { r.state = 'load'; r.t = 0; }
+        break;
+      case 'load':
+        turnRobotTo(r, r.route.face, dt, 8);
+        if (r.t >= ROBOT.loadTime) {
+          const pal = r.route.pallet;
+          if (pal.bars.length) {
+            goldMesh.setMatrixAt(pal.bars.pop(), _zeroM);
+            goldMesh.instanceMatrix.needsUpdate = true;
+            goldLeft--;
+            r.carrying = true; r.bar.visible = true;
+          }
+          r.state = 'back'; r.t = 0;
+        }
+        break;
+      case 'back':
+        if (moveRobotTo(r, r.hole.x, r.hole.z, dt)) { r.state = 'sink'; r.t = 0; }
+        break;
+      case 'sink':
+        p.y -= ROBOT.depth / 0.9 * dt;
+        if (p.y <= -ROBOT.depth) {
+          if (r.carrying) { raid.stolen++; toast = 'Un robot ha escapado con un lingote'; toastT = 1.8; }
+          r.hole.busy = false;
+          removeRobot(r);
+        }
+        break;
+      case 'off': {                                    // inerte: sale del agujero y se queda cabizbajo
+        const k = 1 - Math.exp(-5 * dt);
+        p.y += (0 - p.y) * k;
+        r.torso.rotation.x += (0.32 - r.torso.rotation.x) * k;
+        r.torso.position.y += (0.16 - r.torso.position.y) * k;
+        if (r.t > 7) {
+          r.state = 'fade'; r.t = 0;
+          for (const m of r.mats) m.transparent = true;
+        }
+        break;
+      }
+      case 'fade':
+        for (const m of r.mats) m.opacity = Math.max(0, 1 - r.t / 1.5);
+        if (r.t >= 1.5) removeRobot(r);
+        break;
+    }
+  }
+
+  // Agujeros: se abren mientras están ocupados y se cierran al quedar libres.
+  for (const h of holes) {
+    h.open += ((h.busy ? 1 : 0) - h.open) * (1 - Math.exp(-6 * dt));
+    h.g.scale.setScalar(Math.max(0.001, h.open));
+    h.g.visible = h.open > 0.01;
+  }
+  for (const f of [...zapFx]) {
+    f.t += dt;
+    f.mesh.scale.setScalar(1 + f.t * 4);
+    f.mesh.material.opacity = Math.max(0, 1 - f.t / 0.45);
+    if (f.t >= 0.45) {
+      scene.remove(f.mesh); f.mesh.geometry.dispose(); f.mesh.material.dispose();
+      zapFx.splice(zapFx.indexOf(f), 1);
+    }
+  }
+}
+
+/* ============================================================================
    ZONAS Y MINIMAPA
    ========================================================================== */
 const ZONES = [
@@ -1527,6 +1808,15 @@ function drawMinimap() {
     mmCtx.arc(mmX(o.center.x), mmZ(o.center.z), 2.6, 0, 6.283);
     mmCtx.fill();
   }
+  for (const h of holes) {
+    if (!h.g.visible) continue;
+    mmCtx.fillStyle = '#ff7a2a';
+    mmCtx.fillRect(mmX(h.x) - 2, mmZ(h.z) - 2, 4, 4);
+  }
+  for (const r of robots) {
+    mmCtx.fillStyle = zappable(r) ? '#58d8ff' : '#6b7480';
+    mmCtx.beginPath(); mmCtx.arc(mmX(r.g.position.x), mmZ(r.g.position.z), 2.4, 0, 6.283); mmCtx.fill();
+  }
   const px = mmX(player.position.x), pz = mmZ(player.position.z);
   mmCtx.strokeStyle = '#fff'; mmCtx.lineWidth = 1.4;
   mmCtx.beginPath();
@@ -1554,6 +1844,7 @@ function animate() {
   updatePlayer(dt);
   updateProps(dt);
   updateOpenables(dt);
+  updateRobots(dt);
 
   // El shadow map sigue al personaje: un solo mapa nítido en un mapa grande.
   sun.position.copy(player.position).add(_sunOff);
@@ -1591,10 +1882,14 @@ function animate() {
   // --- Interfaz ---
   zoneEl.textContent = zoneAt(player.position.x, player.position.z);
   const near = nearestOpenable();
+  const nearBot = carriedProp === zapper ? nearestRobot() : null;
   if (toastT > 0) {
     toastT -= dt;
     promptEl.style.display = 'block';
     promptEl.textContent = toast;
+  } else if (nearBot) {
+    promptEl.style.display = 'block';
+    promptEl.textContent = `[Q] Desconectar robot${nearBot.carrying ? ' (lleva un lingote)' : ''}`;
   } else if (near) {
     promptEl.style.display = 'block';
     promptEl.textContent = `[F] ${near.open ? 'Cerrar' : 'Abrir'} · ${near.label}`;
@@ -1607,7 +1902,8 @@ function animate() {
     `pos: ${player.position.x.toFixed(1)}, ${player.position.y.toFixed(1)}, ${player.position.z.toFixed(1)}\n` +
     `dist real: ${camState.actualDistance.toFixed(2)} m` +
     (camState.actualDistance < camState.preferredDistance - 0.05 ? '  [colisión]' : '') +
-    `\nlingotes en custodia: ${goldXforms.length}` +
+    `\nlingotes en custodia: ${goldLeft}` +
+    (raid.active ? `\nrobados: ${raid.stolen} · salvados: ${raid.saved} · robots desconectados: ${raid.zapped}` : '') +
     (carriedProp ? `\nllevas: ${carriedProp.name}  [E para soltar]` : '');
 
   drawMinimap();
