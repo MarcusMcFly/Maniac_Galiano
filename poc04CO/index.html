@@ -4,6 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>POC 04 — Cámara del Oro</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: #0a0c11; overscroll-behavior: none; }
   canvas { display: block; touch-action: none; }
@@ -66,6 +69,66 @@
     #minimap { width: 160px; height: auto; top: 44px; }
     .btn { width: 64px; height: 64px; }
   }
+
+  /* ---- Pantalla de GAME OVER ---- */
+  #gameover {
+    position: fixed; inset: 0; z-index: 20; overflow-y: auto; box-sizing: border-box;
+    padding: 36px 16px 48px; display: flex; justify-content: center; align-items: flex-start;
+    background: radial-gradient(ellipse at 50% 20%, rgba(70,8,14,.94), rgba(4,4,8,.98) 70%);
+    color: #e8e2d0; font: 22px/1.25 'VT323', monospace;
+  }
+  #gameover[hidden] { display: none; }
+  #gameover::after {                                   /* líneas de barrido CRT */
+    content: ''; position: fixed; inset: 0; pointer-events: none;
+    background: repeating-linear-gradient(0deg, rgba(0,0,0,.22) 0 2px, transparent 2px 4px);
+  }
+  .go-panel { width: 100%; max-width: 760px; }
+  .go-title {
+    margin: 8px 0 6px; text-align: center; font: 400 clamp(30px, 9vw, 68px)/1.1 'Press Start 2P', monospace;
+    color: #ff3b3b; letter-spacing: .04em;
+    text-shadow: 5px 5px 0 #5a0000, 0 0 22px rgba(255,59,59,.55);
+    animation: go-flicker 3.2s infinite;
+  }
+  .go-sub {
+    text-align: center; margin: 0 0 26px; color: #ffd166;
+    font: 11px/1.6 'Press Start 2P', monospace; animation: go-blink 1.1s steps(1) infinite;
+  }
+  .go-time {
+    display: flex; flex-wrap: wrap; align-items: baseline; justify-content: center; gap: 6px 16px;
+    padding: 14px; background: #0d1018; border: 3px solid #2e3446; box-shadow: 5px 5px 0 #000;
+  }
+  .go-time span { font: 11px 'Press Start 2P', monospace; color: #9aa6c4; }
+  .go-time b { font: 400 clamp(22px, 6vw, 34px) 'Press Start 2P', monospace; color: #7fe9ff;
+               text-shadow: 3px 3px 0 #0b3a48; }
+  #gameover h2 { margin: 28px 0 10px; font: 400 13px 'Press Start 2P', monospace; color: #ffd166; }
+  .go-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+  .go-card { background: #12141c; border: 3px solid #2e3446; box-shadow: 4px 4px 0 #000;
+             padding: 12px 10px 8px; display: flex; flex-direction: column; gap: 6px; }
+  .go-card b { font: 400 22px 'Press Start 2P', monospace; color: #f4efe2; }
+  .go-card span { color: #9aa6c4; text-transform: uppercase; }
+  .go-card.hot b { color: #ff5a4f; }
+  .go-card.gold b { color: #ffc247; }
+  .go-split p { margin: 4px 0; }
+  .go-split em { font: normal 10px 'Press Start 2P', monospace; color: #7fe9ff; margin-right: 8px; }
+  .go-note { margin: -4px 0 10px; color: #9aa6c4; }
+  .go-table-wrap { overflow-x: auto; border: 3px solid #2e3446; box-shadow: 5px 5px 0 #000; background: #0d1018; }
+  #gameover table { width: 100%; border-collapse: collapse; min-width: 440px; }
+  #gameover th { font: 400 9px 'Press Start 2P', monospace; color: #ffd166; padding: 10px 6px;
+                 border-bottom: 3px solid #2e3446; text-align: center; }
+  #gameover td { text-align: center; padding: 6px; border-bottom: 1px dashed #262b3a; font-size: 24px; }
+  #gameover td:first-child { font: 400 10px 'Press Start 2P', monospace; color: #9aa6c4; white-space: nowrap; }
+  #gameover td small { display: block; font-size: 15px; color: #6f7a96; }
+  #gameover tr.go-total td { color: #ffc247; border-bottom: 0; }
+  .go-zero { color: #3d4458; }
+  #goRestart {
+    display: block; margin: 30px auto 0; padding: 16px 20px; cursor: pointer; border: 0;
+    font: 400 14px 'Press Start 2P', monospace; color: #1a0000; background: #ff3b3b;
+    box-shadow: 5px 5px 0 #5a0000;
+  }
+  #goRestart:active { transform: translate(3px, 3px); box-shadow: 2px 2px 0 #5a0000; }
+  @keyframes go-blink { 50% { opacity: 0; } }
+  @keyframes go-flicker { 0%, 92%, 100% { opacity: 1; } 93% { opacity: .55; } 95% { opacity: 1; } 97% { opacity: .7; } }
+  @media (prefers-reduced-motion: reduce) { .go-title, .go-sub { animation: none; } }
 </style>
 </head>
 <body>
@@ -73,7 +136,16 @@
 <div id="zone"></div>
 <div id="prompt"></div>
 <canvas id="minimap" width="256" height="166"></canvas>
-<div id="hint">Click para capturar el ratón · WASD mover · Espacio saltar · E coger/soltar (el lingote se lanza) · F abrir/cerrar puertas, bóvedas y rejas · Q desconectar robot · palanqueta: tocar al robot · C modo cámara · Rueda zoom · R recentrar · Shift correr · Alt liberar cursor</div>
+<div id="hint">Click para capturar el ratón · WASD mover · Espacio saltar · E coger/soltar (el lingote se lanza) · F abrir/cerrar puertas, bóvedas y rejas, tirar de la palanca · Q desconectar robot · palanqueta: tocar al robot · C modo cámara · Rueda zoom · R recentrar · Shift correr · Alt liberar cursor</div>
+
+<div id="gameover" hidden>
+  <div class="go-panel">
+    <h1 class="go-title">GAME OVER</h1>
+    <p class="go-sub">PARTIDA TERMINADA</p>
+    <div id="goStats"></div>
+    <button id="goRestart">JUGAR OTRA VEZ</button>
+  </div>
+</div>
 
 <div id="ui">
   <div id="joy"><div id="joyThumb"></div></div>
@@ -798,7 +870,8 @@ const goldXforms = [], goldTints = [];
 const pallets = [];           // { cx, cz, hw, hd, bars: índices de instancia, de abajo arriba }
 const _dummy = new THREE.Object3D();
 
-function goldPallet(cx, cz, nx, nz, layers) {
+// `extra`: lingotes de una capa superior incompleta (los primeros que se llevan los robots).
+function goldPallet(cx, cz, nx, nz, layers, extra = 0) {
   const sx = BAR.w + 0.012, sz = BAR.d + 0.012;
   const W = nx * sx, D = nz * sz, baseH = 0.14;
 
@@ -810,11 +883,14 @@ function goldPallet(cx, cz, nx, nz, layers) {
   base.castShadow = base.receiveShadow = true;
   scene.add(base);
 
+  const fullLayers = layers;
+  if (extra > 0) layers++;
   for (let L = 0; L < layers; L++) {
     const shifted = L % 2 === 1;
     const n = shifted ? nx - 1 : nx;
     const off = shifted ? sx * 0.5 : 0;
-    for (let i = 0; i < n; i++) for (let j = 0; j < nz; j++) {
+    let left = L < fullLayers ? n * nz : extra;
+    for (let i = 0; i < n; i++) for (let j = 0; j < nz && left > 0; j++, left--) {
       _dummy.position.set(
         cx - W / 2 + sx * (i + 0.5) + off,
         baseH + BAR.h * (L + 0.5),
@@ -831,12 +907,20 @@ function goldPallet(cx, cz, nx, nz, layers) {
     new THREE.Vector3(cx + W / 2 + 0.09, baseH + BAR.h * layers, cz + D / 2 + 0.09)));
 }
 
+// En custodia: GOLD_TOTAL lingotes. La base (16 × 132 + 8 × 144 = 3.264) se
+// completa con una 5.ª capa en los cuatro palés centrales de las esquinas
+// (4 × 36) y una capa a medias en otro (27): 3.264 + 144 + 27 = 3.435.
+const GOLD_TOTAL = 3435;
+const CENTER_EXTRA = { '-4.6,-5.2': 36, '4.6,-5.2': 36, '-4.6,5.2': 36, '4.6,5.2': 36, '-2.5,-1.8': 27 };
+
 // Cuatro hileras centrales, con pasillo libre en x≈0 entre las dos rejas N-S…
 for (const rz of [-5.2, -1.8, 1.8, 5.2])
-  for (const rx of [-4.6, -2.5, 2.5, 4.6]) goldPallet(rx, rz, 6, 6, 4);
+  for (const rx of [-4.6, -2.5, 2.5, 4.6]) goldPallet(rx, rz, 6, 6, 4, CENTER_EXTRA[`${rx},${rz}`] ?? 0);
 // …y pilas contra los muros este y oeste, dejando libre el eje z≈0.
 for (const sx of [-8.4, 8.4])
   for (const sz of [-5.6, -2.8, 2.8, 5.6]) goldPallet(sx, sz, 4, 8, 5);
+
+if (goldXforms.length !== GOLD_TOTAL) console.warn(`Lingotes en custodia: ${goldXforms.length}, esperados ${GOLD_TOTAL}`);
 
 const goldMesh = new THREE.InstancedMesh(
   new THREE.BoxGeometry(BAR.w, BAR.h, BAR.d), matGold, goldXforms.length);
@@ -1073,6 +1157,7 @@ function nearestOpenable(filter = null) {
 
 let toast = '', toastT = 0;
 function toggleNearestDoor() {
+  if (nearLever()) { pullLever(); return; }
   const o = nearestOpenable();
   if (!o) { toast = 'No hay nada que abrir aquí'; toastT = 1.6; return; }
   if (!o.open) {
@@ -1119,6 +1204,7 @@ function updateOpenables(dt) {
    ========================================================================== */
 const keys = {};
 addEventListener('keydown', e => {
+  if (inputLocked) return;
   keys[e.code] = true;
   setBtnPressed(e.code, true);
   if (e.code === 'Space') e.preventDefault();
@@ -1145,6 +1231,7 @@ renderer.domElement.addEventListener('click', () => {
 renderer.domElement.addEventListener('mousedown', () => { if (camMode === 'orbit') mouseDragging = true; });
 addEventListener('mouseup', () => { mouseDragging = false; userRotating = false; });
 addEventListener('mousemove', e => {
+  if (inputLocked) return;
   const locked = document.pointerLockElement === renderer.domElement;
   if (!locked && !mouseDragging) return;
   userRotating = !locked;
@@ -1172,6 +1259,7 @@ cv.addEventListener('touchstart', e => {
 }, { passive: false });
 cv.addEventListener('touchmove', e => {
   e.preventDefault();
+  if (inputLocked) return;
   if (e.touches.length === 1) {
     const t = e.touches[0];
     camState.yaw -= (t.clientX - lastTX) * 0.006;
@@ -1201,6 +1289,7 @@ joyEl.addEventListener('touchstart', e => {
 }, { passive: false });
 joyEl.addEventListener('touchmove', e => {
   e.preventDefault();
+  if (inputLocked) return;
   const r = joyEl.getBoundingClientRect();
   for (const t of e.changedTouches) {
     if (t.identifier !== joyId) continue;
@@ -1231,7 +1320,11 @@ function setBtnPressed(code, on) {
 }
 function bindButton(id, down, up) {
   const el = document.getElementById(id);
-  el.addEventListener('pointerdown', e => { e.preventDefault(); el.classList.add('pressed'); down(); });
+  el.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    if (inputLocked) return;
+    el.classList.add('pressed'); down();
+  });
   const release = () => { el.classList.remove('pressed'); if (up) up(); };
   el.addEventListener('pointerup', release);
   el.addEventListener('pointercancel', release);
@@ -1755,6 +1848,7 @@ function stopRobot(r, fail) {
   r.state = 'off'; r.t = 0; r.fail = fail; r.fxT = 0;
   r.hole.busy = false;                              // el agujero se cierra
   raid.byKind[FAIL_KIND[fail]]++;
+  blockLog.push({ t: gameTime, kind: FAIL_KIND[fail] });
   raid.byFail[fail]++;
   const p = r.g.position, baseY = Math.max(0, p.y);
   if (fail === 'zap') {
@@ -2035,6 +2129,170 @@ function updateRobots(dt) {
 }
 
 /* ============================================================================
+   TIEMPO DE JUEGO, PALANCA DE GAME OVER Y ESTADÍSTICAS DE LA PARTIDA
+   El tiempo de juego suma el dt de cada frame (no corre con la pestaña oculta).
+   Cada bloqueo de robot queda en `blockLog` con su instante; al final se
+   calculan las mejores rachas en ventanas deslizantes de 1, 2, 3, 5, 8, 13…
+   minutos (Fibonacci) hasta cubrir el tiempo total de la partida.
+   ========================================================================== */
+let gameTime = 0;
+let inputLocked = false, gameOver = false;
+const blockLog = [];                                 // { t, kind: 'zap' | 'crowbar' | 'bar' }
+
+function fmtTime(sec) {
+  const s = Math.floor(sec), h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60, ss = s % 60;
+  const p2 = n => String(n).padStart(2, '0');
+  return h ? `${h}:${p2(m)}:${p2(ss)}` : `${m}:${p2(ss)}`;
+}
+
+// Palanca en la pared del fondo (este) del ramal de salida, la segunda sala de
+// la salida de servicio, tras el portón al exterior; el cartel va encima.
+const LEVER = { x: 26.4, z: 4.4, range: 1.6, up: 0.35, down: 2.55, pullTime: 0.7 };
+const lever = (() => {
+  const g = new THREE.Group();
+  g.position.set(LEVER.x, 0, LEVER.z);
+  g.rotation.y = -Math.PI / 2;                       // el frente (+Z local) mira al oeste
+  scene.add(g);
+  const plate = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.5, 0.08),
+    new THREE.MeshStandardMaterial({ color: 0xf0c419, roughness: 0.6 }));
+  plate.position.set(0, 1.05, 0.04);
+  const slot = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.36, 0.02), matDark);
+  slot.position.set(0, 1.05, 0.09);
+  const pivot = new THREE.Group();
+  pivot.position.set(0, 1.05, 0.1);
+  pivot.rotation.x = LEVER.up;
+  const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.45, 10), matSteel);
+  arm.position.y = 0.225;
+  const knob = new THREE.Mesh(new THREE.SphereGeometry(0.065, 16, 12),
+    new THREE.MeshStandardMaterial({ color: 0xe0242a, roughness: 0.35, emissive: 0x400000 }));
+  knob.position.y = 0.46;
+  pivot.add(arm, knob);
+
+  // Cartel "GAME OVER" en pixel; se redibuja cuando carga la fuente.
+  const c = document.createElement('canvas');
+  c.width = 512; c.height = 128;
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.magFilter = THREE.NearestFilter;
+  const draw = () => {
+    const x = c.getContext('2d');
+    x.fillStyle = '#07070b'; x.fillRect(0, 0, 512, 128);
+    x.fillStyle = '#ff3b3b';
+    for (let i = 0; i < 512; i += 16) { x.fillRect(i, 0, 8, 6); x.fillRect(i + 8, 122, 8, 6); }  // bombillas
+    x.font = '44px "Press Start 2P", monospace';
+    x.textAlign = 'center'; x.textBaseline = 'middle';
+    x.fillStyle = '#5a0000'; x.fillText('GAME OVER', 260, 70);
+    x.fillStyle = '#ff3b3b'; x.fillText('GAME OVER', 256, 66);
+    tex.needsUpdate = true;
+  };
+  draw();
+  document.fonts?.load('44px "Press Start 2P"').then(draw).catch(() => {});
+  const frame = new THREE.Mesh(new THREE.BoxGeometry(1.95, 0.56, 0.06), matDark);
+  frame.position.set(0, 2.45, 0.03);
+  const sign = new THREE.Mesh(new THREE.PlaneGeometry(1.85, 0.46),
+    new THREE.MeshStandardMaterial({ map: tex, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 0.9 }));
+  sign.position.set(0, 2.45, 0.065);
+  g.add(plate, slot, pivot, frame, sign);
+  g.traverse(o => { if (o.isMesh) o.castShadow = true; });
+  return { g, pivot, pulling: false, t: 0 };
+})();
+
+const nearLever = () => !inputLocked &&
+  Math.hypot(player.position.x - LEVER.x, player.position.z - LEVER.z) < LEVER.range;
+
+function pullLever() {
+  if (inputLocked) return;
+  inputLocked = true;
+  lever.pulling = true; lever.t = 0;
+  for (const k in keys) keys[k] = false;
+  joy.x = joy.y = 0;
+  toast = 'GAME OVER'; toastT = 5;
+}
+
+function updateLever(dt) {
+  if (!lever.pulling) return;
+  lever.t += dt;
+  const s = Math.min(1, lever.t / LEVER.pullTime), e = s * s * (3 - 2 * s);
+  lever.pivot.rotation.x = LEVER.up + (LEVER.down - LEVER.up) * e;
+  if (s >= 1 && !gameOver) endGame();
+}
+
+// Mejor racha: máximo de eventos en una ventana deslizante de `w` segundos.
+function bestWindow(times, w) {
+  let best = 0, start = 0;
+  for (let i = 0, j = 0; j < times.length; j++) {
+    while (times[j] - times[i] >= w) i++;
+    if (j - i + 1 > best) { best = j - i + 1; start = times[i]; }
+  }
+  return { best, start };
+}
+
+function fibWindows(total) {
+  const out = [];
+  for (let a = 1, b = 2; a * 60 < total; [a, b] = [b, a + b]) out.push(a);
+  return out;
+}
+
+function gameStats() {
+  const times = { all: blockLog.map(e => e.t) };
+  for (const k of ['zap', 'crowbar', 'bar']) times[k] = blockLog.filter(e => e.kind === k).map(e => e.t);
+  const rows = fibWindows(gameTime).map(m => ({
+    label: `${m} MIN`, w: m * 60,
+    cells: Object.fromEntries(Object.entries(times).map(([k, ts]) => [k, bestWindow(ts, m * 60)])),
+  }));
+  rows.push({ label: 'PARTIDA', w: gameTime,
+    cells: Object.fromEntries(Object.entries(times).map(([k, ts]) => [k, { best: ts.length, start: 0 }])) });
+  return { rows, total: blockLog.length };
+}
+
+function endGame() {
+  gameOver = true;
+  document.exitPointerLock?.();
+  for (const id of ['hud', 'zone', 'prompt', 'minimap', 'hint', 'ui'])
+    document.getElementById(id).style.display = 'none';
+
+  const k = raid.byKind, f = raid.byFail, { rows, total } = gameStats();
+  const perMin = gameTime > 0 ? (total / (gameTime / 60)).toFixed(1) : '0.0';
+  const card = (n, label, cls = '') => `<div class="go-card ${cls}"><b>${n}</b><span>${label}</span></div>`;
+  const cell = (c, w) => c.best
+    ? `${c.best}${w < gameTime ? `<small>${fmtTime(c.start)}–${fmtTime(Math.min(c.start + w, gameTime))}</small>` : ''}`
+    : '<span class="go-zero">0</span>';
+
+  document.getElementById('goStats').innerHTML = `
+    <div class="go-time"><span>TIEMPO DE JUEGO</span><b>${fmtTime(gameTime)}</b></div>
+    <h2>ROBOTS</h2>
+    <div class="go-grid">
+      ${card(total, 'bloqueados', 'hot')}
+      ${card(k.zap, 'desconectados')}
+      ${card(k.crowbar, 'palanquetazos')}
+      ${card(k.bar, 'lingotazos')}
+      ${card(raid.spawned, 'aparecidos')}
+      ${card(perMin, 'bloqueos / min')}
+    </div>
+    <h2>LINGOTES</h2>
+    <div class="go-grid">
+      ${card(raid.saved, 'salvados', 'gold')}
+      ${card(raid.stolen, 'robados')}
+      ${card(goldLeft.toLocaleString('es-ES'), 'en custodia')}
+    </div>
+    <h2>GOLPES</h2>
+    <div class="go-split">
+      <p><em>PALANQUETA</em> frente ${f.short} · salto ${f.spring} · giro ${f.spin}</p>
+      <p><em>LINGOTE</em> cabeza ${f.dizzy} · cuerpo ${f.apart} · orugas ${f.beetle}</p>
+    </div>
+    <h2>MEJORES RACHAS</h2>
+    <p class="go-note">Máximo de robots bloqueados en cualquier tramo de N minutos.</p>
+    <div class="go-table-wrap"><table>
+      <thead><tr><th>TRAMO</th><th>TOTAL</th><th>DESCON.</th><th>PALANQ.</th><th>LINGOT.</th></tr></thead>
+      <tbody>${rows.map(r => `<tr${r.label === 'PARTIDA' ? ' class="go-total"' : ''}><td>${r.label}</td>` +
+        ['all', 'zap', 'crowbar', 'bar'].map(c => `<td>${cell(r.cells[c], r.w)}</td>`).join('') + '</tr>').join('')}
+      </tbody>
+    </table></div>`;
+  document.getElementById('gameover').hidden = false;
+}
+document.getElementById('goRestart').addEventListener('click', () => location.reload());
+
+/* ============================================================================
    ZONAS Y MINIMAPA
    ========================================================================== */
 const ZONES = [
@@ -2128,7 +2386,10 @@ function robotStats() {
 function animate() {
   requestAnimationFrame(animate);
   const dt = Math.min(clock.getDelta(), 0.05);
+  if (gameOver) { renderer.render(scene, camera); return; }   // todo congelado tras el GAME OVER
+  gameTime += dt;
 
+  updateLever(dt);
   updatePlayer(dt);
   updateProps(dt);
   updateOpenables(dt);
@@ -2180,6 +2441,9 @@ function animate() {
     promptEl.textContent = (carriedProp === zapper ? '[Q] Desconectar robot'
       : 'Palanqueta: tócalo de frente, salta encima o gira al pasar') +
       (nearBot.carrying ? ' (lleva un lingote)' : '');
+  } else if (nearLever()) {
+    promptEl.style.display = 'block';
+    promptEl.textContent = '[F] Tirar de la palanca · GAME OVER (termina la partida)';
   } else if (near) {
     promptEl.style.display = 'block';
     promptEl.textContent = `[F] ${near.open ? 'Cerrar' : 'Abrir'} · ${near.label}`;
@@ -2188,6 +2452,7 @@ function animate() {
   }
 
   hud.textContent =
+    `tiempo de juego: ${fmtTime(gameTime)}\n` +
     `cámara: ${camMode === 'tpp' ? 'TPP' : 'ÓRBITA'}\n` +
     `pos: ${player.position.x.toFixed(1)}, ${player.position.y.toFixed(1)}, ${player.position.z.toFixed(1)}\n` +
     `dist real: ${camState.actualDistance.toFixed(2)} m` +

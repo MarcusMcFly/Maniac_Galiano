@@ -75,12 +75,28 @@ La 2.ª bóveda solo se abre llevando la tarjeta de acceso; después queda desbl
   - ~2,6–3,5 m → cuerpo: se desmonta, la cabeza y los brazos caen al suelo;
   - ~3,5–4,4 m → orugas (el lingote llega resbalando): resbala y cae de espaldas pataleando.
 - HUD: robados · salvados · desconectados · palanquetazos · lingotazos, con desglose
-  por tipo de golpe. Minimapa: robots y agujeros.
+  por tipo de golpe.
+
+### Tiempo de juego y GAME OVER
+
+- El HUD muestra el tiempo de juego (suma de frames: no corre con la pestaña oculta).
+- Palanca roja con cartel luminoso `GAME OVER` en la pared del fondo del ramal de
+  salida (2.ª sala de la salida de servicio, tras el portón al exterior). `F` tira
+  de ella: se bloquean los controles, la palanca baja y la partida se congela.
+- Pantalla final con tipografía pixel (Press Start 2P + VT323, Google Fonts):
+  tiempo de juego, robots (bloqueados, desconectados, palanquetazos, lingotazos,
+  aparecidos, bloqueos/min), lingotes (salvados, robados, en custodia) y golpes.
+- Mejores rachas: máximo de robots bloqueados en cualquier tramo de 1, 2, 3, 5, 8,
+  13, 21, 34, 55, 89… minutos (Fibonacci, solo tramos más cortos que la partida) y
+  la partida completa; columnas total / desconectados / palanquetazos / lingotazos,
+  con el minuto en que ocurrió cada racha. Botón `JUGAR OTRA VEZ` (recarga). Minimapa: robots y agujeros.
 Hoja abierta no colisiona; no se cierra con jugador u objeto en el hueco.
 
 ### Oro
 
-- 3.264 lingotes en 24 palés, una sola `InstancedMesh`.
+- 3.435 lingotes en custodia en 24 palés, una sola `InstancedMesh`: 16 centrales de
+  132 y 8 laterales de 144 (3.264), más una 5.ª capa en 4 palés centrales (4 × 36)
+  y una capa a medias en otro (27). Si el total no cuadra, aviso en consola.
 - Colisión AABB por palé.
 - 5 lingotes sueltos recogibles.
 
