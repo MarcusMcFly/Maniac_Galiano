@@ -1,0 +1,2476 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>POC 04 — Cámara del Oro</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0a0c11; overscroll-behavior: none; }
+  canvas { display: block; touch-action: none; }
+  #hud {
+    position: fixed; top: 12px; left: 12px; color: #cfe3ff;
+    font: 12px/1.5 Consolas, monospace; background: rgba(0,0,0,.55);
+    padding: 10px 14px; border-radius: 8px; pointer-events: none; white-space: pre;
+  }
+  #zone {
+    position: fixed; top: 12px; left: 50%; transform: translateX(-50%);
+    color: #f1e3c0; font: 600 15px/1.3 Georgia, serif; letter-spacing: .04em;
+    background: rgba(0,0,0,.5); padding: 7px 18px; border-radius: 6px;
+    border: 1px solid rgba(220,190,120,.35); pointer-events: none; white-space: nowrap;
+  }
+  #prompt {
+    position: fixed; bottom: 96px; left: 50%; transform: translateX(-50%);
+    color: #ffe9a8; font: 13px/1.4 system-ui, sans-serif; background: rgba(0,0,0,.62);
+    padding: 7px 14px; border-radius: 6px; border: 1px solid rgba(255,220,140,.35);
+    pointer-events: none; white-space: nowrap; display: none;
+  }
+  #minimap {
+    position: fixed; top: 12px; right: 12px; border-radius: 8px;
+    border: 1px solid rgba(255,255,255,.18); background: rgba(8,10,14,.78);
+    pointer-events: none;
+  }
+  #hint {
+    position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%);
+    color: #ddd; font: 12px/1.4 system-ui, sans-serif; background: rgba(0,0,0,.55);
+    padding: 8px 16px; border-radius: 8px; pointer-events: none; max-width: 90vw; text-align: center;
+  }
+  #ui { position: fixed; inset: 0; pointer-events: none; user-select: none; -webkit-user-select: none; }
+  #joy {
+    position: absolute; left: 24px; bottom: 24px; width: 124px; height: 124px;
+    border-radius: 50%; background: rgba(255,255,255,.08);
+    border: 2px solid rgba(255,255,255,.25);
+    pointer-events: auto; touch-action: none; display: none;
+  }
+  #joyThumb {
+    position: absolute; left: 50%; top: 50%; width: 52px; height: 52px;
+    border-radius: 50%; background: rgba(255,255,255,.35);
+    transform: translate(-50%,-50%);
+  }
+  #buttons {
+    position: absolute; right: 18px; bottom: 20px; display: flex;
+    flex-direction: column; gap: 10px; align-items: flex-end;
+  }
+  .btn {
+    pointer-events: auto; touch-action: none; cursor: pointer;
+    width: 58px; height: 58px; border-radius: 50%;
+    background: rgba(0,0,0,.45); border: 2px solid rgba(255,255,255,.35);
+    color: #eee; font: 600 11px/1.15 system-ui, sans-serif; text-align: center;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+  }
+  .btn small { opacity: .6; font-size: 10px; font-weight: 400; }
+  .btn.pressed { background: rgba(120,170,255,.6); border-color: #cfe3ff; }
+  @media (max-width: 760px), (pointer: coarse) {
+    #hint { display: none; }
+    #hud { font-size: 10px; padding: 6px 8px; }
+    #zone { font-size: 13px; top: 8px; }
+    #minimap { width: 160px; height: auto; top: 44px; }
+    .btn { width: 64px; height: 64px; }
+  }
+
+  /* ---- Pantalla de GAME OVER ---- */
+  #gameover {
+    position: fixed; inset: 0; z-index: 20; overflow-y: auto; box-sizing: border-box;
+    padding: 36px 16px 48px; display: flex; justify-content: center; align-items: flex-start;
+    background: radial-gradient(ellipse at 50% 20%, rgba(70,8,14,.94), rgba(4,4,8,.98) 70%);
+    color: #e8e2d0; font: 22px/1.25 'VT323', monospace;
+  }
+  #gameover[hidden] { display: none; }
+  #gameover::after {                                   /* líneas de barrido CRT */
+    content: ''; position: fixed; inset: 0; pointer-events: none;
+    background: repeating-linear-gradient(0deg, rgba(0,0,0,.22) 0 2px, transparent 2px 4px);
+  }
+  .go-panel { width: 100%; max-width: 760px; }
+  .go-title {
+    margin: 8px 0 6px; text-align: center; font: 400 clamp(30px, 9vw, 68px)/1.1 'Press Start 2P', monospace;
+    color: #ff3b3b; letter-spacing: .04em;
+    text-shadow: 5px 5px 0 #5a0000, 0 0 22px rgba(255,59,59,.55);
+    animation: go-flicker 3.2s infinite;
+  }
+  .go-sub {
+    text-align: center; margin: 0 0 26px; color: #ffd166;
+    font: 11px/1.6 'Press Start 2P', monospace; animation: go-blink 1.1s steps(1) infinite;
+  }
+  .go-time {
+    display: flex; flex-wrap: wrap; align-items: baseline; justify-content: center; gap: 6px 16px;
+    padding: 14px; background: #0d1018; border: 3px solid #2e3446; box-shadow: 5px 5px 0 #000;
+  }
+  .go-time span { font: 11px 'Press Start 2P', monospace; color: #9aa6c4; }
+  .go-time b { font: 400 clamp(22px, 6vw, 34px) 'Press Start 2P', monospace; color: #7fe9ff;
+               text-shadow: 3px 3px 0 #0b3a48; }
+  #gameover h2 { margin: 28px 0 10px; font: 400 13px 'Press Start 2P', monospace; color: #ffd166; }
+  .go-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+  .go-card { background: #12141c; border: 3px solid #2e3446; box-shadow: 4px 4px 0 #000;
+             padding: 12px 10px 8px; display: flex; flex-direction: column; gap: 6px; }
+  .go-card b { font: 400 22px 'Press Start 2P', monospace; color: #f4efe2; }
+  .go-card span { color: #9aa6c4; text-transform: uppercase; }
+  .go-card.hot b { color: #ff5a4f; }
+  .go-card.gold b { color: #ffc247; }
+  .go-split p { margin: 4px 0; }
+  .go-split em { font: normal 10px 'Press Start 2P', monospace; color: #7fe9ff; margin-right: 8px; }
+  .go-note { margin: -4px 0 10px; color: #9aa6c4; }
+  .go-table-wrap { overflow-x: auto; border: 3px solid #2e3446; box-shadow: 5px 5px 0 #000; background: #0d1018; }
+  #gameover table { width: 100%; border-collapse: collapse; min-width: 440px; }
+  #gameover th { font: 400 9px 'Press Start 2P', monospace; color: #ffd166; padding: 10px 6px;
+                 border-bottom: 3px solid #2e3446; text-align: center; }
+  #gameover td { text-align: center; padding: 6px; border-bottom: 1px dashed #262b3a; font-size: 24px; }
+  #gameover td:first-child { font: 400 10px 'Press Start 2P', monospace; color: #9aa6c4; white-space: nowrap; }
+  #gameover td small { display: block; font-size: 15px; color: #6f7a96; }
+  #gameover tr.go-total td { color: #ffc247; border-bottom: 0; }
+  .go-zero { color: #3d4458; }
+  #goRestart {
+    display: block; margin: 30px auto 0; padding: 16px 20px; cursor: pointer; border: 0;
+    font: 400 14px 'Press Start 2P', monospace; color: #1a0000; background: #ff3b3b;
+    box-shadow: 5px 5px 0 #5a0000;
+  }
+  #goRestart:active { transform: translate(3px, 3px); box-shadow: 2px 2px 0 #5a0000; }
+  @keyframes go-blink { 50% { opacity: 0; } }
+  @keyframes go-flicker { 0%, 92%, 100% { opacity: 1; } 93% { opacity: .55; } 95% { opacity: 1; } 97% { opacity: .7; } }
+  @media (prefers-reduced-motion: reduce) { .go-title, .go-sub { animation: none; } }
+</style>
+</head>
+<body>
+<div id="hud"></div>
+<div id="zone"></div>
+<div id="prompt"></div>
+<canvas id="minimap" width="256" height="166"></canvas>
+<div id="hint">Click para capturar el ratón · WASD mover · Espacio saltar · E coger/soltar (el lingote se lanza) · F abrir/cerrar puertas, bóvedas y rejas, tirar de la palanca · Q desconectar robot · palanqueta: tocar al robot · C modo cámara · Rueda zoom · R recentrar · Shift correr · Alt liberar cursor</div>
+
+<div id="gameover" hidden>
+  <div class="go-panel">
+    <h1 class="go-title">GAME OVER</h1>
+    <p class="go-sub">PARTIDA TERMINADA</p>
+    <div id="goStats"></div>
+    <button id="goRestart">JUGAR OTRA VEZ</button>
+  </div>
+</div>
+
+<div id="ui">
+  <div id="joy"><div id="joyThumb"></div></div>
+  <div id="buttons">
+    <div class="btn" id="btnCam">CÁM<small>C</small></div>
+    <div class="btn" id="btnZap">DESCON.<small>Q</small></div>
+    <div class="btn" id="btnDoor">ABRIR<small>F</small></div>
+    <div class="btn" id="btnGrab">COGER<small>E</small></div>
+    <div class="btn" id="btnJump">SALTO<small>␣</small></div>
+  </div>
+</div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+
+/* ============================================================================
+   POC 04 — CÁMARA DEL ORO
+   Planta reconstruida a partir de assets/references/01_c_o_map.png
+
+   Ejes (igual que el plano: arriba = norte):
+     +X = este   ·   -X = oeste
+     +Z = sur    ·   -Z = norte
+   Recorrido: Acceso principal → Control y vigilancia → Corredor de acceso →
+   1.ª puerta de bóveda → Vestíbulo blindado → Recodo de seguridad →
+   2.ª puerta de bóveda → Pasillo perimetral → Cámara principal del oro.
+   Ramales: Galería de descenso → Pozo/foso de seguridad; Salida de servicio.
+   ========================================================================== */
+
+const profile = {
+  minDistance: 2.2,
+  maxDistance: 10,
+  defaultDistance: 5.0,
+  minPitch: THREE.MathUtils.degToRad(-18),
+  maxPitch: THREE.MathUtils.degToRad(72),
+  defaultPitch: THREE.MathUtils.degToRad(28),
+  horizontalSensitivity: 0.0025,
+  verticalSensitivity: 0.0020,
+  zoomStep: 0.6,
+  followSmoothness: 12,
+  rotationSmoothness: 14,
+  zoomSmoothness: 10,
+  collisionRadius: 0.25,
+  collisionMargin: 0.15,
+  walkSpeed: 2.6,
+  runSpeed: 5.2,
+  jumpSpeed: 6.2,
+  gravity: 18,
+  stepHeight: 0.38,        // altura máxima que se sube sin saltar (escaleras)
+  snapDown: 0.45,          // pegado al suelo al bajar escalones
+  grabRange: 1.7,
+  turnSpeed: THREE.MathUtils.degToRad(540),
+  recenterDuration: 0.35,
+  fadeObstructionDelay: 0.15,
+  fadeMinOpacity: 0.20,
+};
+
+const GEPS = 0.004;        // holgura al apoyarse (evita que el AABB toque el suelo)
+
+// ---------- Escena y renderer ----------
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0a0c11);
+scene.fog = new THREE.Fog(0x0a0c11, 26, 74);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.15;
+document.body.appendChild(renderer.domElement);
+
+const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 220);
+
+// Entorno mínimo (canvas 64×32) para que el acero y el oro tengan algo que
+// reflejar. Sin esto, metalness alto se ve negro.
+(function buildEnvironment() {
+  const c = document.createElement('canvas');
+  c.width = 64; c.height = 32;
+  const g = c.getContext('2d');
+  const grad = g.createLinearGradient(0, 0, 0, 32);
+  grad.addColorStop(0.0, '#5c6a80');
+  grad.addColorStop(0.5, '#2b303b');
+  grad.addColorStop(1.0, '#14161c');
+  g.fillStyle = grad; g.fillRect(0, 0, 64, 32);
+  g.fillStyle = '#fff1d2';
+  g.fillRect(6, 3, 7, 3); g.fillRect(26, 5, 9, 3); g.fillRect(48, 2, 6, 4);
+  const tex = new THREE.CanvasTexture(c);
+  tex.mapping = THREE.EquirectangularReflectionMapping;
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromEquirectangular(tex).texture;
+  scene.environmentIntensity = 0.55;
+  tex.dispose(); pmrem.dispose();
+})();
+
+// ---------- Texturas procedurales ----------
+function canvasTexture(size, draw) {
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  draw(c.getContext('2d'), size);
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+  return t;
+}
+function speckle(g, n, s, colors, alpha = 0.18) {
+  for (let i = 0; i < n; i++) {
+    g.globalAlpha = alpha * (0.4 + Math.random() * 0.6);
+    g.fillStyle = colors[(Math.random() * colors.length) | 0];
+    const r = 2 + Math.random() * s * 0.05;
+    g.beginPath();
+    g.arc(Math.random() * s, Math.random() * s, r, 0, 6.283);
+    g.fill();
+  }
+  g.globalAlpha = 1;
+}
+
+const texStone = canvasTexture(256, (g, s) => {           // pavimento de piedra
+  g.fillStyle = '#b9b09c'; g.fillRect(0, 0, s, s);
+  speckle(g, 260, s, ['#cfc7b4', '#a79e8b', '#c4bba7'], 0.3);
+  g.strokeStyle = 'rgba(70,64,54,.55)'; g.lineWidth = 3;
+  for (let i = 0; i <= 2; i++) {
+    g.beginPath(); g.moveTo(i * s / 2, 0); g.lineTo(i * s / 2, s); g.stroke();
+    g.beginPath(); g.moveTo(0, i * s / 2); g.lineTo(s, i * s / 2); g.stroke();
+  }
+});
+const texVaultFloor = canvasTexture(256, (g, s) => {      // suelo pulido de la cámara
+  g.fillStyle = '#cdc6b4'; g.fillRect(0, 0, s, s);
+  speckle(g, 200, s, ['#ded8c8', '#bdb6a4'], 0.22);
+  g.strokeStyle = 'rgba(95,88,74,.5)'; g.lineWidth = 2;
+  for (let i = 0; i <= 4; i++) {
+    g.beginPath(); g.moveTo(i * s / 4, 0); g.lineTo(i * s / 4, s); g.stroke();
+    g.beginPath(); g.moveTo(0, i * s / 4); g.lineTo(s, i * s / 4); g.stroke();
+  }
+});
+const texConcrete = canvasTexture(256, (g, s) => {        // hormigón armado
+  g.fillStyle = '#8f8d85'; g.fillRect(0, 0, s, s);
+  speckle(g, 420, s, ['#a3a199', '#7b7971', '#9b9890', '#6e6c65'], 0.28);
+  g.strokeStyle = 'rgba(60,58,53,.25)'; g.lineWidth = 2;
+  g.beginPath(); g.moveTo(0, s / 2); g.lineTo(s, s / 2); g.stroke();
+});
+const texSteel = canvasTexture(256, (g, s) => {           // estructura y muros de acero
+  g.fillStyle = '#54616f'; g.fillRect(0, 0, s, s);
+  for (let i = 0; i < 90; i++) {
+    g.globalAlpha = 0.12 + Math.random() * 0.14;
+    g.fillStyle = Math.random() < 0.5 ? '#6a798a' : '#45505c';
+    g.fillRect(0, Math.random() * s, s, 1 + Math.random() * 3);
+  }
+  g.globalAlpha = 1;
+  g.fillStyle = '#7b8b9c';
+  for (const [x, y] of [[18, 18], [238, 18], [18, 238], [238, 238], [128, 128]]) {
+    g.beginPath(); g.arc(x, y, 5, 0, 6.283); g.fill();
+  }
+  g.strokeStyle = 'rgba(30,36,43,.55)'; g.lineWidth = 3;
+  g.strokeRect(1.5, 1.5, s - 3, s - 3);
+});
+const texRock = canvasTexture(256, (g, s) => {            // tierra excavada / roca
+  g.fillStyle = '#453425'; g.fillRect(0, 0, s, s);
+  speckle(g, 520, s, ['#56422e', '#35281b', '#5f4b34', '#2b2017'], 0.4);
+});
+
+// `tile` no es una propiedad de material: es el tamaño en metros al que se
+// repite la textura, y lo consume scaleBoxUV al crear cada caja.
+function mat(map, { tile = 2.2, ...opts } = {}) {
+  const m = new THREE.MeshStandardMaterial({ map, roughness: 0.9, ...opts });
+  m.userData.tile = tile;
+  return m;
+}
+const matStone    = mat(texStone,      { tile: 2.4, roughness: 0.92 });
+const matVaultFlr = mat(texVaultFloor, { tile: 2.0, roughness: 0.55, metalness: 0.08 });
+const matConcrete = mat(texConcrete,   { tile: 2.6, roughness: 0.95 });
+const matSteel    = mat(texSteel,      { tile: 2.0, roughness: 0.42, metalness: 0.65, color: 0x9fb0c2 });
+const matRock     = mat(texRock,       { tile: 3.0, roughness: 1.0 });
+const matGold     = new THREE.MeshStandardMaterial({ color: 0xffc247, metalness: 0.9, roughness: 0.26 });
+const matWood     = new THREE.MeshStandardMaterial({ color: 0x6d4a2b, roughness: 0.85 });
+const matDark     = new THREE.MeshStandardMaterial({ color: 0x2a2f36, roughness: 0.6, metalness: 0.3 });
+const matBrass    = new THREE.MeshStandardMaterial({ color: 0xb08a3c, metalness: 0.85, roughness: 0.35 });
+
+// ---------- Luces ----------
+scene.add(new THREE.AmbientLight(0x7f8fb0, 0.55));
+scene.add(new THREE.HemisphereLight(0x9fb4d8, 0x3a2e22, 0.45));
+
+// Direccional que sigue al personaje: un único shadow map nítido en un mapa grande.
+const sun = new THREE.DirectionalLight(0xffeedd, 0.85);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.left = -15; sun.shadow.camera.right = 15;
+sun.shadow.camera.top = 15;   sun.shadow.camera.bottom = -15;
+sun.shadow.camera.near = 1;   sun.shadow.camera.far = 60;
+sun.shadow.bias = -0.0009;
+scene.add(sun);
+scene.add(sun.target);
+
+// ---------- Registro de colisiones y de mapa ----------
+const CAMERA_COLLISION_LAYER = 2;
+const cameraColliders = [];   // mallas contra las que colisiona / se funde la cámara
+const wallBoxes = [];         // AABBs sólidos (personaje y objetos)
+const mapWalls = [];          // para el minimapa
+const mapFloors = [];
+
+function scaleBoxUV(g, w, h, d, tile) {
+  const uv = g.attributes.uv;
+  const f = [[d, h], [d, h], [w, d], [w, d], [w, h], [w, h]];
+  for (let face = 0; face < 6; face++) {
+    const [su, sv] = f[face];
+    for (let i = 0; i < 4; i++) {
+      const k = face * 4 + i;
+      uv.setXY(k, uv.getX(k) * su / tile, uv.getY(k) * sv / tile);
+    }
+  }
+  uv.needsUpdate = true;
+}
+
+// Caja genérica definida por sus extremos en el mundo.
+function solid(x0, z0, x1, z1, y0, y1, material,
+               { fade = false, cam = true, collide = true, map = true, shadow = true } = {}) {
+  const w = x1 - x0, h = y1 - y0, d = z1 - z0;
+  const g = new THREE.BoxGeometry(w, h, d);
+  scaleBoxUV(g, w, h, d, material.userData.tile ?? 2.2);
+  let m = material;
+  if (fade) { m = material.clone(); m.transparent = true; m.opacity = 1; }
+  const mesh = new THREE.Mesh(g, m);
+  mesh.position.set((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
+  mesh.castShadow = shadow; mesh.receiveShadow = true;
+  mesh.userData.cameraFadeable = fade;
+  scene.add(mesh);
+  if (cam) { mesh.layers.enable(CAMERA_COLLISION_LAYER); cameraColliders.push(mesh); }
+  if (collide) wallBoxes.push(new THREE.Box3(
+    new THREE.Vector3(x0, y0, z0), new THREE.Vector3(x1, y1, z1)));
+  if (map) mapWalls.push({ x0, z0, x1, z1 });
+  return mesh;
+}
+
+const H  = 3.6;    // altura libre estándar
+const HV = 4.4;    // altura en el recinto blindado
+const TC = 1.2;    // hormigón armado
+const TV = 1.6;    // muro de la bóveda
+const TS = 0.6;    // acero
+const TI = 0.35;   // tabique
+
+// Muro recto a lo largo de X (z fijo). `fade` por defecto: se vuelve traslúcido
+// cuando se interpone entre la cámara y el personaje.
+function wallX(z0, z1, x0, x1, { y0 = 0, y1 = H, m = matConcrete, fade = true } = {}) {
+  return solid(x0, z0, x1, z1, y0, y1, m, { fade });
+}
+const wallZ = wallX;   // misma función: la caja ya lleva los cuatro extremos
+
+// Muro con hueco. axis 'x': corre en X entre a y b; el hueco va de ga a gb.
+// axis 'z': corre en Z. Si gapTop < y1 se añade el dintel.
+function wallGap(axis, c0, c1, a, b, ga, gb, gapTop, opts = {}) {
+  const { y0 = 0, y1 = H, m = matConcrete, fade = true } = opts;
+  const seg = (s, e) => (axis === 'x')
+    ? solid(s, c0, e, c1, y0, y1, m, { fade })
+    : solid(c0, s, c1, e, y0, y1, m, { fade });
+  if (ga > a + 1e-6) seg(a, ga);
+  if (b > gb + 1e-6) seg(gb, b);
+  if (gapTop < y1 - 1e-6) {
+    if (axis === 'x') solid(ga, c0, gb, c1, gapTop, y1, m, { fade });
+    else              solid(c0, ga, c1, gb, gapTop, y1, m, { fade });
+  }
+}
+
+// Losa de suelo (0.5 de canto bajo la cota indicada).
+function floorSlab(x0, z0, x1, z1, y, material, zone) {
+  solid(x0, z0, x1, z1, y - 0.5, y, material, { cam: false, map: false, shadow: false });
+  mapFloors.push({ x0, z0, x1, z1, zone: zone ?? null });
+}
+
+// Masa de roca excavada: solo decorado, sin colisión.
+function rock(x0, z0, x1, z1, y0, y1) {
+  solid(x0, z0, x1, z1, y0, y1, matRock, { cam: false, collide: false, map: false, shadow: false });
+}
+
+// Mueble/caja sencilla con AABB.
+function addBox(x, z, w, h, d, color, { cam = false, y = 0, rough = 0.75, metal = 0, collide = true } = {}) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d),
+    new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: metal }));
+  m.position.set(x, y + h / 2, z);
+  m.castShadow = m.receiveShadow = true;
+  if (cam) { m.layers.enable(CAMERA_COLLISION_LAYER); cameraColliders.push(m); }
+  scene.add(m);
+  if (collide) wallBoxes.push(new THREE.Box3().setFromObject(m));
+  return m;
+}
+
+// Luminaria de techo. `power > 0` añade luz real (se usan pocas: cuestan).
+function addLamp(x, z, y, power = 0, color = 0xffe6b8, dist = 16) {
+  const g = new THREE.Group();
+  g.position.set(x, y, z);
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.12, 0.26), matDark);
+  g.add(body);
+  const tube = new THREE.Mesh(new THREE.BoxGeometry(0.78, 0.06, 0.16),
+    new THREE.MeshStandardMaterial({ color: 0xfff3dd, emissive: color, emissiveIntensity: 2.4 }));
+  tube.position.y = -0.08;
+  g.add(tube);
+  if (power > 0) {
+    const l = new THREE.PointLight(color, power, dist, 2);
+    l.position.y = -0.25;
+    g.add(l);
+  }
+  scene.add(g);
+  return g;
+}
+
+/* ============================================================================
+   SISTEMA DE APERTURA (tecla F)
+   Todo lo que se abre —puertas de bóveda, puertas acorazadas, rejas y
+   armarios— comparte la misma estructura: una o dos hojas sobre un pivote y
+   un AABB (`liveBox`) que se vacía mientras está abierto, de modo que la hoja
+   abierta deja de colisionar.
+   ========================================================================== */
+const openables = [];
+
+function addSwingDoor({
+  x, z, rotY = 0, w, h, label, range = 2.6, leaves = 1, hinge = 1, hingeOut = 0,
+  openAngle = Math.PI * 0.58, speed = 3.2, make, dropSpot = null, outerBox = null,
+}) {
+  const g = new THREE.Group();
+  g.position.set(x, 0, z);
+  g.rotation.y = rotY;                       // la hoja abre hacia el +Z local
+  scene.add(g);
+
+  const list = [], blockers = [];
+  // `hingeOut` separa el eje de giro del plano del hueco (como el brazo de
+  // bisagra de una bóveda real): sin él, la hoja abierta a 90° se incrusta
+  // media hoja dentro de la jamba.
+  const mount = (side, leafW, offset) => {
+    const pivot = new THREE.Group();
+    pivot.position.set(side * w / 2, 0, hingeOut);
+    g.add(pivot);
+    const leaf = make(leafW, h, side);
+    leaf.position.set(offset, 0, -hingeOut);
+    pivot.add(leaf);
+    list.push({ pivot, angle: side * openAngle });
+    blockers.push(leaf.userData.block ?? leaf);
+  };
+  if (leaves === 1) mount(hinge, w, -hinge * w / 2);
+  else for (const s of [-1, 1]) mount(s, w / 2, -s * w / 4);
+
+  g.updateWorldMatrix(true, true);
+  const closedBox = new THREE.Box3();
+  for (const b of blockers) closedBox.expandByObject(b);
+  closedBox.expandByScalar(0.02);
+
+  const liveBox = closedBox.clone();
+  wallBoxes.push(liveBox);
+
+  const o = {
+    leaves: list, closedBox, liveBox, open: false, speed, label, range,
+    center: new THREE.Vector3(x, 0, z), dropSpot, outerBox, group: g,
+  };
+  openables.push(o);
+  return o;
+}
+
+// --- Puerta de bóveda acorazada: disco con pernos, aro y volante ---
+// `cy` es la altura del centro: por debajo de R el disco se hunde en la losa y
+// el hueco deja un paso plano en el suelo.
+function vaultLeaf(R, cy = R, thickness = 0.55) {
+  return (w, h, side) => {
+    const leaf = new THREE.Group();
+    const steel = new THREE.MeshStandardMaterial({ color: 0x8e9eb0, metalness: 0.85, roughness: 0.3 });
+
+    const discGeo = new THREE.CylinderGeometry(R, R, thickness, 44);
+    discGeo.rotateX(Math.PI / 2);                       // eje del cilindro → Z
+    const disc = new THREE.Mesh(discGeo, steel);
+    disc.position.y = cy;
+    disc.castShadow = disc.receiveShadow = true;
+    leaf.add(disc);
+    leaf.userData.block = disc;                          // AABB = el disco
+
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(R * 0.93, 0.07, 10, 44),
+      new THREE.MeshStandardMaterial({ color: 0x6f7d8c, metalness: 0.9, roughness: 0.35 }));
+    ring.position.set(0, cy, thickness / 2);
+    leaf.add(ring);
+
+    for (let i = 0; i < 12; i++) {                       // pernos del perímetro
+      const a = i / 12 * Math.PI * 2;
+      const bolt = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 0.1, 10), matBrass);
+      bolt.rotation.x = Math.PI / 2;
+      bolt.position.set(Math.cos(a) * R * 0.78, cy + Math.sin(a) * R * 0.78, thickness / 2 + 0.04);
+      leaf.add(bolt);
+    }
+    const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.22, 0.22, 16), matBrass);
+    hub.rotation.x = Math.PI / 2;
+    hub.position.set(0, cy, thickness / 2 + 0.12);
+    leaf.add(hub);
+    const wheel = new THREE.Mesh(new THREE.TorusGeometry(R * 0.33, 0.055, 10, 28), matBrass);
+    wheel.position.set(0, cy, thickness / 2 + 0.22);
+    leaf.add(wheel);
+    for (let i = 0; i < 4; i++) {                        // radios del volante
+      const sp = new THREE.Mesh(new THREE.BoxGeometry(R * 0.62, 0.05, 0.05), matBrass);
+      sp.position.set(0, cy, thickness / 2 + 0.22);
+      sp.rotation.z = i * Math.PI / 4;
+      leaf.add(sp);
+    }
+    // brazo de bisagra hacia el quicio
+    const arm = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.26, 0.3), steel);
+    arm.position.set(side * (R + 0.2), cy, 0);
+    leaf.add(arm);
+
+    leaf.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+    return leaf;
+  };
+}
+
+// El hueco del muro (wallGap) es rectangular, de ancho 2R y alto `gapTop`;
+// el marco lo cierra hasta dejar un hueco circular del radio del disco.
+function addVaultDoor(x, z, rotY, R, label, hinge = 1,
+                      { cy = R - 0.4, wallT = TC, m = matConcrete, gapTop = 3.0 } = {}) {
+  const d = addSwingDoor({
+    x, z, rotY, w: R * 2, h: R * 2, label, hinge, range: 3.2, speed: 2.1,
+    openAngle: Math.PI * 0.5, hingeOut: 0.45, make: vaultLeaf(R, cy),
+  });
+  d.heavy = true;
+  addVaultFrame(x, z, rotY, R, cy, wallT, m, gapTop);
+  return d;
+}
+
+function addVaultFrame(x, z, rotY, R, cy, wallT, m, gapTop) {
+  const g = new THREE.Group();
+  g.position.set(x, 0, z);
+  g.rotation.y = rotY;
+  scene.add(g);
+  const hole = () => new THREE.Path().absarc(0, cy, R, 0, Math.PI * 2, true);
+
+  // Relleno: rectángulo que se mete en el muro (por debajo de la losa y por
+  // encima del dintel) con el agujero circular; 1 cm rehundido en cada cara
+  // para que no parpadee contra el muro.
+  const fillShape = new THREE.Shape();
+  fillShape.moveTo(-R - 0.3, -0.45).lineTo(R + 0.3, -0.45)
+           .lineTo(R + 0.3, gapTop + 0.2).lineTo(-R - 0.3, gapTop + 0.2).closePath();
+  fillShape.holes.push(hole());
+  const depth = wallT - 0.02;
+  const fillGeo = new THREE.ExtrudeGeometry(fillShape, { depth, bevelEnabled: false, curveSegments: 48 });
+  fillGeo.translate(0, 0, -depth / 2);
+  const fm = m.clone(); fm.transparent = true; fm.opacity = 1;
+  const fill = new THREE.Mesh(fillGeo, fm);
+  fill.castShadow = fill.receiveShadow = true;
+  fill.userData.cameraFadeable = true;
+  fill.layers.enable(CAMERA_COLLISION_LAYER);
+  cameraColliders.push(fill);
+  g.add(fill);
+
+  // Aro de acero en ambas caras, rodeando el hueco
+  const collarShape = new THREE.Shape().absarc(0, cy, R + 0.28, 0, Math.PI * 2, false);
+  collarShape.holes.push(hole());
+  const collarGeo = new THREE.ExtrudeGeometry(collarShape, { depth: 0.06, bevelEnabled: false, curveSegments: 48 });
+  const collarMat = new THREE.MeshStandardMaterial({ color: 0x5f6b78, metalness: 0.85, roughness: 0.4 });
+  for (const s of [-1, 1]) {
+    const c = new THREE.Mesh(collarGeo, collarMat);
+    c.position.z = s > 0 ? wallT / 2 : -wallT / 2 - 0.06;
+    c.receiveShadow = true;
+    g.add(c);
+  }
+
+  // Colisión aproximada de las esquinas (la del hueco rectangular ya existe).
+  // Abajo, una sola caja más alta que stepHeight para que no se suba a ella.
+  g.updateWorldMatrix(true, true);
+  const local = (x0, x1, y0, y1) => wallBoxes.push(new THREE.Box3(
+    new THREE.Vector3(x0, y0, -wallT / 2), new THREE.Vector3(x1, y1, wallT / 2)).applyMatrix4(g.matrixWorld));
+  for (const dy of [0.8, 1.3]) {
+    const hx = Math.sqrt(R * R - dy * dy);
+    local(-R, -hx, cy + dy, gapTop);
+    local(hx, R, cy + dy, gapTop);
+  }
+  local(-R, R, cy + R - 0.05, gapTop);
+  const hx0 = Math.sqrt(R * R - cy * cy);              // medio ancho del paso a ras de suelo
+  local(-R, -hx0, 0, 0.45);
+  local(hx0, R, 0, 0.45);
+}
+
+// --- Reja / cerramiento de barrotes (doble hoja) ---
+function barLeaf(w, h, side) {
+  const leaf = new THREE.Group();
+  const m = new THREE.MeshStandardMaterial({ color: 0x3d4650, metalness: 0.8, roughness: 0.45 });
+  const frame = (gw, gh, gd, px, py) => {
+    const b = new THREE.Mesh(new THREE.BoxGeometry(gw, gh, gd), m);
+    b.position.set(px, py, 0);
+    b.castShadow = b.receiveShadow = true;
+    leaf.add(b);
+  };
+  frame(w, 0.1, 0.12, 0, 0.06);
+  frame(w, 0.1, 0.12, 0, h - 0.06);
+  frame(w, 0.08, 0.12, 0, h * 0.5);
+  frame(0.1, h, 0.12, -w / 2 + 0.05, h / 2);
+  frame(0.1, h, 0.12, w / 2 - 0.05, h / 2);
+  const n = Math.max(3, Math.round(w / 0.26));
+  for (let i = 1; i < n; i++)
+    frame(0.055, h - 0.2, 0.08, -w / 2 + i * w / n, h / 2);
+  // caja de bloqueo para el AABB (la reja frena igual que una puerta)
+  const block = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.12),
+    new THREE.MeshBasicMaterial({ visible: false }));
+  block.position.y = h / 2;
+  leaf.add(block);
+  leaf.userData.block = block;
+  return leaf;
+}
+function addBarGate(x, z, rotY, w, h, label) {
+  return addSwingDoor({ x, z, rotY, w, h, label, leaves: 2, openAngle: Math.PI * 0.52, speed: 4, make: barLeaf });
+}
+
+// --- Puerta acorazada rectangular (acceso principal, salida de servicio) ---
+function armoredLeaf(w, h, side) {
+  const leaf = new THREE.Group();
+  const steel = new THREE.MeshStandardMaterial({ color: 0x7b8899, metalness: 0.8, roughness: 0.38 });
+  const slab = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.34), steel);
+  slab.position.y = h / 2;
+  slab.castShadow = slab.receiveShadow = true;
+  leaf.add(slab);
+  leaf.userData.block = slab;
+  for (const sy of [0.18, 0.5, 0.82]) {                  // refuerzos horizontales
+    const r = new THREE.Mesh(new THREE.BoxGeometry(w * 0.9, 0.12, 0.08), matDark);
+    r.position.set(0, h * sy, 0.2);
+    leaf.add(r);
+  }
+  for (const sy of [h * 0.18, h * 0.82]) {               // bisagras
+    const hg = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.3, 10), matDark);
+    hg.position.set(side * (w / 2 - 0.08), sy, 0.18);
+    leaf.add(hg);
+  }
+  const handle = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.035, 8, 20), matBrass);
+  handle.position.set(-side * (w / 2 - 0.3), h * 0.5, 0.2);
+  leaf.add(handle);
+  leaf.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  return leaf;
+}
+function addArmoredDoor(x, z, rotY, w, h, label, hinge = 1) {
+  return addSwingDoor({ x, z, rotY, w, h, label, hinge, speed: 3.4, hingeOut: 0.22,
+                        openAngle: Math.PI * 0.52, make: armoredLeaf });
+}
+
+// --- Armario / taquilla: cuerpo hueco de 5 paneles + puerta ---
+function addCabinet(x, z, w, h, d, rotY, { body, front, cam = false, floorY = 0.05, label = 'armario' } = {}) {
+  const t = 0.05;
+  const g = new THREE.Group();
+  g.position.set(x, 0, z);
+  g.rotation.y = rotY;
+  scene.add(g);
+  const m = new THREE.MeshStandardMaterial({ color: body, roughness: 0.65, metalness: 0.25 });
+  const panel = (px, py, pz, pw, ph, pd) => {
+    const p = new THREE.Mesh(new THREE.BoxGeometry(pw, ph, pd), m);
+    p.position.set(px, py, pz);
+    p.castShadow = p.receiveShadow = true;
+    g.add(p);
+    if (cam) { p.layers.enable(CAMERA_COLLISION_LAYER); cameraColliders.push(p); }
+    p.updateWorldMatrix(true, false);
+    wallBoxes.push(new THREE.Box3().setFromObject(p));
+  };
+  panel(0, floorY - t / 2, 0, w, t, d - t);
+  panel(0, h - t / 2, 0, w, t, d);
+  panel(0, h / 2, -d / 2 + t / 2, w, h, t);
+  panel(-w / 2 + t / 2, h / 2, 0, t, h, d);
+  panel(w / 2 - t / 2, h / 2, 0, t, h, d);
+  g.updateWorldMatrix(true, true);
+  const outerBox = new THREE.Box3().setFromObject(g);
+
+  const door = addSwingDoor({
+    x, z: z + 0, rotY, w: w - 0.02, h: h - 0.02, label, range: 1.9, hinge: -1,
+    openAngle: 1.95, speed: 7,
+    make: (lw, lh) => {
+      const leaf = new THREE.Group();
+      const panelMesh = new THREE.Mesh(new THREE.BoxGeometry(lw, lh, t),
+        new THREE.MeshStandardMaterial({ color: front ?? body, roughness: 0.55, metalness: 0.3 }));
+      panelMesh.position.set(0, lh / 2 + 0.01, 0);
+      panelMesh.castShadow = true;
+      leaf.add(panelMesh);
+      leaf.userData.block = panelMesh;
+      const hd = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.2, 0.05), matBrass);
+      hd.position.set(lw / 2 - 0.1, lh / 2, t);
+      leaf.add(hd);
+      return leaf;
+    },
+  });
+  // la hoja va en el plano frontal del armario
+  door.group.position.set(x + Math.sin(rotY) * (d / 2 - t / 2), 0, z + Math.cos(rotY) * (d / 2 - t / 2));
+  door.group.updateWorldMatrix(true, true);
+  door.closedBox.makeEmpty();
+  for (const l of door.leaves) door.closedBox.expandByObject(l.pivot);
+  door.closedBox.expandByScalar(0.02);
+  door.liveBox.copy(door.closedBox);
+  door.outerBox = outerBox;
+  door.dropSpot = new THREE.Vector3(x, floorY + 0.3, z);
+  return door;
+}
+
+/* ============================================================================
+   PLANTA
+   ========================================================================== */
+
+// ---- Masa de roca excavada (decorado, sin colisión), hueca bajo el foso ----
+rock(-50, -32,  34,  12.8, -6, -0.5);
+rock(-50,  20.2, 34,  27,  -6, -0.5);
+rock(-50,  12.8, -20.4, 20.2, -6, -0.5);
+rock( 16.5, 12.8, 34,  20.2, -6, -0.5);
+rock(-20.4, 12.8, 16.5, 20.2, -6, -3.1);
+
+// ---- Suelos ----
+floorSlab(-40,   -23.4, -36,   -19.6, 0, matStone);                 // antesala
+floorSlab(-42.2, -20.8, -33.8, -11.6, 0, matStone);                 // acceso principal
+floorSlab(-42.2, -12.2, -33.8,  -3.6, 0, matStone);                 // control y vigilancia
+floorSlab(-34,   -16.0, -25.7, -12.0, 0, matStone);                 // corredor de acceso
+floorSlab(-26.4, -17.2, -18.6,  -9.9, 0, matStone);                 // vestíbulo blindado
+floorSlab(-24.1, -10.8, -19.4,   2.2, 0, matStone);                 // recodo (tramo N-S)
+floorSlab(-20.6,  -2.2, -15.5,   2.2, 0, matStone);                 // recodo (tramo E-O)
+floorSlab(-20.4,   1.6, -15.8,   5.4, 0, matStone);                 // galería, tramo alto
+floorSlab(-20.4,  12.4, -15.8,  13.4, -2.6, matConcrete);           // galería, rellano bajo
+floorSlab(-20.4,  12.8,  16.5,  20.2, -2.6, matConcrete);           // pozo / foso
+floorSlab( 16.1,   0.8,  23.7,   7.4, 0, matStone);                 // salida de servicio
+floorSlab( 23.7,   2.4,  27.0,   6.4, 0, matStone);                 // ramal de salida
+// Pasillo perimetral: anillo en cuatro losas (sin solapar la cámara del oro)
+floorSlab(-16.1, -13.1,  16.1,  -7.6, 0, matStone);
+floorSlab(-16.1,   7.6,  16.1,  13.1, 0, matStone);
+floorSlab(-16.1,  -7.6, -10.6,   7.6, 0, matStone);
+floorSlab( 10.6,  -7.6,  16.1,   7.6, 0, matStone);
+floorSlab(-10.6,  -7.6,  10.6,   7.6, 0, matVaultFlr);              // cámara del oro
+
+// Escalera de descenso al foso: 13 peldaños de 0.2 de contrahuella.
+for (let i = 0; i < 13; i++) {
+  const z0 = 5.4 + i * (7.0 / 13), z1 = z0 + 7.0 / 13;
+  solid(-19.8, z0, -16.1, z1, -3.1, -i * 0.2, matConcrete, { cam: false, map: false, shadow: false });
+}
+
+// ---- Antesala de entrada ----
+wallX(-24.6, -23.4, -41.2, -34.8);
+wallZ(-23.4, -19.6, -41.2, -40.0);
+wallZ(-23.4, -19.6, -36.0, -34.8);
+
+// ---- Acceso principal + Control y vigilancia ----
+wallGap('x', -20.8, -19.6, -43.2, -32.8, -39.6, -36.4, 3.0);        // fachada norte + puerta
+wallZ(-20.8,  -2.8, -43.2, -42.0);                                  // muro oeste corrido
+wallX( -4.0,  -2.8, -43.2, -32.8);                                  // muro sur
+wallGap('z', -34.0, -32.8, -20.8, -2.8, -15.6, -12.4, H);           // muro este, hueco al corredor
+wallGap('x', -12.2, -11.8, -42.0, -34.0, -40.0, -37.5, H,
+        { m: matSteel });                                           // tabique control/acceso
+
+addArmoredDoor(-38, -20.2, Math.PI, 3.2, 3.0, 'Puerta de acceso principal');
+
+// ---- Corredor de acceso (del vestíbulo de control a la 1.ª bóveda) ----
+wallX(-16.8, -15.6, -32.8, -25.7);
+wallX(-12.4, -11.2, -32.8, -25.7);
+
+// ---- Primera puerta de bóveda: mamparo de hormigón del vestíbulo ----
+wallGap('z', -26.9, -25.7, -18.0, -9.2, -15.6, -12.4, 3.0, { m: matSteel });
+addVaultDoor(-26.3, -14.0, -Math.PI / 2, 1.6, 'Primera puerta de bóveda', 1,
+             { wallT: TC, m: matSteel });
+
+// ---- Vestíbulo blindado ----
+wallX(-18.0, -16.8, -26.9, -17.8);
+wallZ(-18.0,  -9.2, -19.0, -17.8);
+wallGap('x', -10.4, -9.2, -26.9, -17.8, -23.5, -20.0, H);           // salida al recodo
+
+// ---- Recodo de seguridad (tramo norte-sur y tramo este-oeste) ----
+wallZ(-10.4,   2.8, -24.7, -23.5);
+wallZ(-10.4,  -2.8, -20.0, -18.8);
+wallX( -2.8,  -1.6, -20.0, -16.1);
+wallX(  1.6,   2.8, -24.7, -19.8);                                  // deja paso a la galería
+
+// ---- Galería de descenso (muro oeste, baja hasta el foso) ----
+wallZ(  1.6,  12.0, -21.0, -19.8);
+solid(-21.0, 12.0, -19.8, 20.8, -3.2, H, matConcrete, { fade: true });
+
+// ---- Recinto blindado: muro de hormigón armado de la bóveda ----
+wallX(-13.1, -11.5, -16.1,  16.1, { y1: HV });                                      // norte
+wallX( 11.5,  13.1, -16.1,  16.1, { y1: HV });                                      // sur
+wallGap('z', -16.1, -14.5, -11.5, 11.5, -1.6, 1.6, 3.0, { y1: HV });                // oeste + 2.ª bóveda
+wallGap('z',  14.5,  16.1, -11.5, 11.5,  2.4, 5.6, 3.0, { y1: HV });                // este + servicio
+solid(-16.1, 11.5, 16.1, 13.1, -3.2, 0, matConcrete, { cam: false, map: false, shadow: false }); // muro de contención del foso
+
+const secondVault = addVaultDoor(-15.3, 0, -Math.PI / 2, 1.6, 'Segunda puerta de bóveda', -1, { wallT: TV });
+addArmoredDoor(15.3, 4.0, Math.PI / 2, 3.2, 3.0, 'Puerta de la salida de servicio');
+
+// ---- Cámara principal del oro: muros de acero con cuatro rejas ----
+wallGap('x', -8.0, -7.4, -11.0, 11.0, -1.6, 1.6, 3.0, { y1: HV, m: matSteel });     // norte
+wallGap('x',  7.4,  8.0, -11.0, 11.0, -1.6, 1.6, 3.0, { y1: HV, m: matSteel });     // sur
+wallGap('z', -11.0, -10.4, -7.4, 7.4, -1.6, 1.6, 3.0, { y1: HV, m: matSteel });     // oeste
+wallGap('z',  10.4,  11.0, -7.4, 7.4, -1.6, 1.6, 3.0, { y1: HV, m: matSteel });     // este
+
+addBarGate(0, -7.7, Math.PI, 3.2, 3.0, 'Reja norte de la cámara');
+addBarGate(0,  7.7, 0,       3.2, 3.0, 'Reja sur de la cámara');
+addBarGate(-10.7, 0, -Math.PI / 2, 3.2, 3.0, 'Reja oeste de la cámara');
+addBarGate( 10.7, 0,  Math.PI / 2, 3.2, 3.0, 'Reja este de la cámara');
+
+// Pilastras de acero en las esquinas del pasillo perimetral
+for (const sx of [-1, 1]) for (const sz of [-1, 1])
+  solid(sx * 13.6 - 0.45, sz * 10.6 - 0.45, sx * 13.6 + 0.45, sz * 10.6 + 0.45, 0, HV, matSteel, { fade: true });
+
+// ---- Salida de servicio ----
+wallX(  0.4,   1.6, 16.1, 23.7);
+wallX(  6.6,   7.8, 16.1, 23.7);
+wallGap('z', 22.5, 23.7, 1.6, 6.6, 2.8, 6.0, 3.0);
+wallX(  1.6,   2.8, 23.7, 27.6);
+wallX(  6.0,   7.2, 23.7, 27.6);
+wallZ(  1.6,   7.2, 26.4, 27.6);
+addArmoredDoor(23.1, 4.4, Math.PI / 2, 3.2, 3.0, 'Portón de salida al exterior');
+
+// ---- Pozo / foso de seguridad ----
+solid(-21.0, 19.6,  17.3, 20.8, -3.2, H, matConcrete, { fade: true });              // sur
+solid( 16.1, 13.1,  17.3, 20.8, -3.2, H, matConcrete, { fade: true });              // este
+// Pilastras de contención contra el muro sur de la bóveda
+for (const px of [-12, -4, 4, 12])
+  solid(px - 1.0, 13.2, px + 1.0, 15.2, -2.6, 0.5, matConcrete, { fade: true });
+// Lámina de agua en el fondo del foso
+const puddle = new THREE.Mesh(new THREE.PlaneGeometry(33, 4.6),
+  new THREE.MeshStandardMaterial({ color: 0x1d3038, metalness: 0.9, roughness: 0.12 }));
+puddle.rotation.x = -Math.PI / 2;
+puddle.position.set(-2, -2.57, 17.4);
+scene.add(puddle);
+
+/* ============================================================================
+   LINGOTES EN CUSTODIA
+   Todos los lingotes son instancias de una sola malla (una llamada de dibujo).
+   La colisión de cada palé es un único AABB, no una caja por lingote.
+   ========================================================================== */
+const BAR = { w: 0.30, h: 0.10, d: 0.13 };
+const goldXforms = [], goldTints = [];
+const pallets = [];           // { cx, cz, hw, hd, bars: índices de instancia, de abajo arriba }
+const _dummy = new THREE.Object3D();
+
+// `extra`: lingotes de una capa superior incompleta (los primeros que se llevan los robots).
+function goldPallet(cx, cz, nx, nz, layers, extra = 0) {
+  const sx = BAR.w + 0.012, sz = BAR.d + 0.012;
+  const W = nx * sx, D = nz * sz, baseH = 0.14;
+
+  const pal = { cx, cz, hw: W / 2 + 0.09, hd: D / 2 + 0.09, bars: [] };
+  pallets.push(pal);
+
+  const base = new THREE.Mesh(new THREE.BoxGeometry(W + 0.18, baseH, D + 0.18), matWood);
+  base.position.set(cx, baseH / 2, cz);
+  base.castShadow = base.receiveShadow = true;
+  scene.add(base);
+
+  const fullLayers = layers;
+  if (extra > 0) layers++;
+  for (let L = 0; L < layers; L++) {
+    const shifted = L % 2 === 1;
+    const n = shifted ? nx - 1 : nx;
+    const off = shifted ? sx * 0.5 : 0;
+    let left = L < fullLayers ? n * nz : extra;
+    for (let i = 0; i < n; i++) for (let j = 0; j < nz && left > 0; j++, left--) {
+      _dummy.position.set(
+        cx - W / 2 + sx * (i + 0.5) + off,
+        baseH + BAR.h * (L + 0.5),
+        cz - D / 2 + sz * (j + 0.5));
+      _dummy.rotation.set(0, (Math.random() - 0.5) * 0.035, 0);
+      _dummy.updateMatrix();
+      pal.bars.push(goldXforms.length);
+      goldXforms.push(_dummy.matrix.clone());
+      goldTints.push(0.86 + Math.random() * 0.26);
+    }
+  }
+  wallBoxes.push(new THREE.Box3(
+    new THREE.Vector3(cx - W / 2 - 0.09, 0, cz - D / 2 - 0.09),
+    new THREE.Vector3(cx + W / 2 + 0.09, baseH + BAR.h * layers, cz + D / 2 + 0.09)));
+}
+
+// En custodia: GOLD_TOTAL lingotes. La base (16 × 132 + 8 × 144 = 3.264) se
+// completa con una 5.ª capa en los cuatro palés centrales de las esquinas
+// (4 × 36) y una capa a medias en otro (27): 3.264 + 144 + 27 = 3.435.
+const GOLD_TOTAL = 3435;
+const CENTER_EXTRA = { '-4.6,-5.2': 36, '4.6,-5.2': 36, '-4.6,5.2': 36, '4.6,5.2': 36, '-2.5,-1.8': 27 };
+
+// Cuatro hileras centrales, con pasillo libre en x≈0 entre las dos rejas N-S…
+for (const rz of [-5.2, -1.8, 1.8, 5.2])
+  for (const rx of [-4.6, -2.5, 2.5, 4.6]) goldPallet(rx, rz, 6, 6, 4, CENTER_EXTRA[`${rx},${rz}`] ?? 0);
+// …y pilas contra los muros este y oeste, dejando libre el eje z≈0.
+for (const sx of [-8.4, 8.4])
+  for (const sz of [-5.6, -2.8, 2.8, 5.6]) goldPallet(sx, sz, 4, 8, 5);
+
+if (goldXforms.length !== GOLD_TOTAL) console.warn(`Lingotes en custodia: ${goldXforms.length}, esperados ${GOLD_TOTAL}`);
+
+const goldMesh = new THREE.InstancedMesh(
+  new THREE.BoxGeometry(BAR.w, BAR.h, BAR.d), matGold, goldXforms.length);
+const _c = new THREE.Color();
+goldXforms.forEach((m, i) => {
+  goldMesh.setMatrixAt(i, m);
+  goldMesh.setColorAt(i, _c.setRGB(goldTints[i], goldTints[i] * 0.86, goldTints[i] * 0.42));
+});
+goldMesh.castShadow = goldMesh.receiveShadow = true;
+goldMesh.instanceMatrix.needsUpdate = true;
+scene.add(goldMesh);
+
+// Letrero de la cámara
+(function chamberSign() {
+  const c = document.createElement('canvas');
+  c.width = 512; c.height = 96;
+  const g = c.getContext('2d');
+  g.fillStyle = '#1b2029'; g.fillRect(0, 0, 512, 96);
+  g.strokeStyle = '#c9a227'; g.lineWidth = 4; g.strokeRect(6, 6, 500, 84);
+  g.fillStyle = '#e8d9ab'; g.font = 'bold 40px Georgia, serif';
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText('LINGOTES EN CUSTODIA', 256, 50);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  const s = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 0.64),
+    new THREE.MeshStandardMaterial({ map: t, emissive: 0xffffff, emissiveMap: t, emissiveIntensity: 0.25 }));
+  s.position.set(0, 3.6, -7.35);
+  scene.add(s);
+})();
+
+/* ---------------------------------------------------------------------------
+   Mobiliario por zonas
+   ------------------------------------------------------------------------- */
+// — Antesala y acceso principal —
+addBox(-38, -17.6, 4.2, 1.05, 0.8, 0x6d5a44, { cam: true });        // mostrador
+addBox(-38, -17.6, 4.4, 0.08, 1.0, 0x8d979e, { y: 1.05 });          // encimera
+addBox(-41.2, -15.0, 0.55, 0.45, 2.6, 0x58493a);                    // banco
+for (const px of [-36.6, -35.3])                                     // tornos de paso
+  addBox(px, -13.6, 0.26, 1.0, 0.26, 0x47525e, { metal: 0.6 });
+addBox(-41, -23.0, 0.9, 0.08, 0.5, 0x2a2f36, { y: 1.9, collide: false });
+
+// — Control y vigilancia —
+addBox(-41.1, -8.0, 1.1, 0.78, 5.2, 0x5a6472, { cam: true, metal: 0.3 });   // consola
+for (const mz of [-10.0, -8.0, -6.0]) {                              // monitores
+  addBox(-41.1, mz, 0.1, 0.62, 1.0, 0x1b1f26, { y: 0.78 });
+  const scr = new THREE.Mesh(new THREE.PlaneGeometry(0.92, 0.54),
+    new THREE.MeshStandardMaterial({ color: 0x0b2436, emissive: 0x2e7fb5, emissiveIntensity: 0.9 }));
+  scr.rotation.y = Math.PI / 2;
+  scr.position.set(-41.03, 1.1, mz);
+  scene.add(scr);
+}
+for (const cz2 of [-9.4, -6.6]) addBox(-39.6, cz2, 0.5, 0.52, 0.5, 0x3c3429);  // sillas
+addBox(-35.2, -5.6, 0.9, 2.0, 0.9, 0x23272e, { cam: true, metal: 0.4 });       // rack
+for (let i = 0; i < 6; i++) {                                                   // pilotos del rack
+  const led = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.04),
+    new THREE.MeshStandardMaterial({ color: 0x8cff9e, emissive: 0x33ff66, emissiveIntensity: 3 }));
+  led.position.set(-34.76, 0.5 + i * 0.25, -5.6 + (i % 2 ? 0.2 : -0.2));
+  scene.add(led);
+}
+addCabinet(-35.4, -10.6, 1.0, 2.0, 0.6, Math.PI, { body: 0x44536a, cam: true, label: 'taquilla de guardia' });
+addCabinet(-35.4, -9.3, 1.0, 2.0, 0.6, Math.PI, { body: 0x44536a, cam: true, label: 'taquilla de llaves' });
+addCabinet(-39.0, -4.4, 0.9, 1.1, 0.5, Math.PI / 2 + Math.PI, { body: 0x4a4038, floorY: 0.05, label: 'archivador' });
+
+// — Vestíbulo blindado —
+addBox(-23.6, -15.4, 2.4, 0.95, 0.9, 0x5a6472, { cam: true, metal: 0.3 });  // puesto de control
+addBox(-25.2, -11.4, 0.55, 0.45, 2.2, 0x58493a);                            // banco
+addCabinet(-19.6, -13.0, 1.0, 2.0, 0.6, -Math.PI / 2, { body: 0x3f4a58, cam: true, label: 'armero' });
+addCabinet(-19.6, -11.6, 1.0, 2.0, 0.6, -Math.PI / 2, { body: 0x3f4a58, cam: true, label: 'armario de material' });
+
+// — Pasillo perimetral: cerramientos de rejas contra el muro de la cámara —
+function grillePanel(x, z, rotY, w) {
+  const g = new THREE.Group();
+  g.position.set(x, 0, z); g.rotation.y = rotY; scene.add(g);
+  const m = new THREE.MeshStandardMaterial({ color: 0x39424c, metalness: 0.75, roughness: 0.5 });
+  const add = (gw, gh, px, py) => {
+    const b = new THREE.Mesh(new THREE.BoxGeometry(gw, gh, 0.1), m);
+    b.position.set(px, py, 0); b.castShadow = b.receiveShadow = true; g.add(b);
+  };
+  add(w, 0.12, 0, 0.06); add(w, 0.12, 0, 2.54);
+  const n = Math.round(w / 0.3);
+  for (let i = 0; i <= n; i++) add(0.05, 2.5, -w / 2 + i * w / n, 1.3);
+  for (let i = 1; i <= 4; i++) add(w, 0.05, 0, i * 0.5);
+}
+for (const gz of [-5.2, -3.0, 3.0, 5.2]) {
+  grillePanel(-11.25, gz, Math.PI / 2, 1.8);
+  grillePanel( 11.25, gz, Math.PI / 2, 1.8);
+}
+for (const gx of [-7.5, -4.5, 4.5, 7.5]) {
+  grillePanel(gx, -8.25, 0, 2.2);
+  grillePanel(gx,  8.25, 0, 2.2);
+}
+
+// — Cámara del oro: carretilla y cajas abiertas —
+addBox(1.9, -0.2, 1.2, 0.18, 0.8, 0x4b545f, { y: 0.1, metal: 0.5 });        // plataforma
+addBox(1.35, -0.2, 0.1, 1.0, 0.8, 0x4b545f, { y: 0.28, metal: 0.5 });       // asa
+for (const cp of [[-2.4, 0.3], [2.9, -0.9]]) {                               // cajas de transporte
+  addBox(cp[0], cp[1], 1.0, 0.1, 0.7, 0x5c432a);
+  addBox(cp[0], cp[1] - 0.35, 1.0, 0.34, 0.08, 0x5c432a, { y: 0.1 });
+  addBox(cp[0], cp[1] + 0.35, 1.0, 0.34, 0.08, 0x5c432a, { y: 0.1 });
+  addBox(cp[0] - 0.5, cp[1], 0.08, 0.34, 0.7, 0x5c432a, { y: 0.1 });
+  addBox(cp[0] + 0.5, cp[1], 0.08, 0.34, 0.7, 0x5c432a, { y: 0.1 });
+}
+
+// — Salida de servicio —
+addBox(17.4, 2.6, 1.6, 1.9, 0.6, 0x4a5260, { cam: true, metal: 0.35 });     // estantería
+addBox(21.0, 6.0, 1.1, 0.9, 1.1, 0x5c432a);                                 // cajas
+addBox(21.2, 2.4, 0.9, 0.7, 0.9, 0x5c432a);
+
+// — Pozo / foso —
+for (const dx of [-14, -7, 2, 9]) addBox(dx, 18.6, 1.0, 0.5, 1.0, 0x3b332a, { y: -2.6 });  // escombros
+addBox(-17.5, 14.4, 0.6, 2.9, 0.12, 0x4e5862, { y: -2.6, metal: 0.6 });   // escala de servicio
+
+// ---- Luminarias (solo siete emiten luz real; el resto son fijos) ----
+addLamp(-38, -16.5, 3.3, 0);
+addLamp(-38,  -8.0, 3.3, 16, 0xffe9c4, 20);
+addLamp(-30, -14.0, 3.3, 0);
+addLamp(-22, -13.6, 3.3, 14, 0xffe4bd, 18);
+addLamp(-21.7, -5.0, 3.3, 0);
+addLamp(-18.0,  0.0, 3.3, 14, 0xcfe0ff, 16);
+addLamp(-17.8,  8.0, 3.3, 0);
+addLamp(  0.0, -9.8, 4.1, 15, 0xd6e4ff, 24);
+addLamp(  0.0,  9.8, 4.1, 0);
+addLamp( -6.0,  0.0, 4.1, 18, 0xffeec2, 20);
+addLamp(  6.0,  0.0, 4.1, 18, 0xffeec2, 20);
+addLamp( 19.4,  4.0, 3.3, 13, 0xffe2b0, 16);
+addLamp( -4.0, 16.4, 0.6, 12, 0x9fc4d8, 22);
+
+/* ============================================================================
+   OBJETOS COGIBLES (E)
+   ========================================================================== */
+const props = [];
+function addProp(mesh, x, z, { shape, radius, halfHeight, y = 0, name = 'objeto' }) {
+  mesh.position.set(x, y + halfHeight, z);
+  mesh.castShadow = mesh.receiveShadow = true;
+  scene.add(mesh);
+  const p = { mesh, vel: new THREE.Vector3(), shape, radius, halfHeight, name, carried: false, grounded: false };
+  props.push(p);
+  return p;
+}
+const looseBarGeo = new THREE.BoxGeometry(0.42, 0.14, 0.19);
+function looseBar(x, z, y) {
+  return addProp(new THREE.Mesh(looseBarGeo, matGold.clone()), x, z,
+    { shape: 'box', radius: 0.23, halfHeight: 0.07, y, name: 'lingote de oro' });
+}
+looseBar(-2.4, 0.3, 0.1);     // dentro de una caja de transporte
+looseBar(2.9, -0.9, 0.1);
+looseBar(0.8, 2.6, 0);
+looseBar(-6.2, -3.4, 0);
+looseBar(19.8, 5.4, 0);       // uno que ya iba camino de la salida de servicio
+addProp(new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.08, 0.3),
+  new THREE.MeshStandardMaterial({ color: 0xd8c66a, roughness: 0.5 })),
+  -35.4, -9.3, { shape: 'box', radius: 0.17, halfHeight: 0.04, y: 0.05, name: 'manojo de llaves' });
+addProp(new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.42),
+  new THREE.MeshStandardMaterial({ color: 0xe8b23a, roughness: 0.45, emissive: 0x3a2a00 })),
+  -40.8, -7.0, { shape: 'box', radius: 0.17, halfHeight: 0.06, y: 0.78, name: 'linterna' });
+const crowbar = addProp(new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.07, 1.3),
+  new THREE.MeshStandardMaterial({ color: 0x9aa3ad, metalness: 0.8, roughness: 0.35 })),
+  -24.2, -12.6, { shape: 'box', radius: 0.25, halfHeight: 0.04, y: 0, name: 'palanqueta' });
+const accessCard = addProp(new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.02, 0.16),
+  new THREE.MeshStandardMaterial({ color: 0xe0e6ec, roughness: 0.4, emissive: 0x16202b })),
+  -19.6, -13.0, { shape: 'box', radius: 0.14, halfHeight: 0.01, y: 0.05, name: 'tarjeta de acceso' });
+// La tarjeta solo abre la 2.ª bóveda; una vez aceptada, la puerta queda desbloqueada.
+secondVault.requires = accessCard;
+// Desconectador de robots: sobre el mostrador del acceso, junto al punto de salida.
+const zapper = (() => {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.09, 0.34),
+    new THREE.MeshStandardMaterial({ color: 0xf0c419, roughness: 0.5 }));
+  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.12, 0.08), matDark);
+  grip.position.set(0, -0.08, -0.1);
+  const tip = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.05, 0.08, 12),
+    new THREE.MeshStandardMaterial({ color: 0x9ff3ff, emissive: 0x2fd3ff, emissiveIntensity: 1.6 }));
+  tip.rotation.x = Math.PI / 2;
+  tip.position.z = 0.2;
+  g.add(body, grip, tip);
+  g.traverse(o => { if (o.isMesh) o.castShadow = true; });
+  return addProp(g, -37.2, -17.6, { shape: 'box', radius: 0.18, halfHeight: 0.06, y: 1.13, name: 'desconectador' });
+})();
+addProp(new THREE.Mesh(new THREE.SphereGeometry(0.16, 20, 14),
+  new THREE.MeshStandardMaterial({ color: 0x3fa7d6, roughness: 0.35 })),
+  -4, 16.4, { shape: 'sphere', radius: 0.16, halfHeight: 0.16, y: -2.6, name: 'esfera' });
+
+/* ============================================================================
+   PERSONAJE
+   ========================================================================== */
+const SPAWN = new THREE.Vector3(-38, 0, -16.2);
+const player = new THREE.Group();
+const bodyMesh = new THREE.Mesh(new THREE.CapsuleGeometry(0.3, 0.9, 6, 14),
+  new THREE.MeshStandardMaterial({ color: 0xd4593a, roughness: 0.6 }));
+bodyMesh.position.y = 0.85;
+bodyMesh.castShadow = true;
+player.add(bodyMesh);
+const nose = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.3, 10),
+  new THREE.MeshStandardMaterial({ color: 0xffcf5a }));
+nose.rotation.x = Math.PI / 2;
+nose.position.set(0, 1.3, 0.35);
+player.add(nose);
+player.position.copy(SPAWN);
+player.rotation.y = Math.PI / 2;          // mirando al este, hacia la bóveda
+scene.add(player);
+
+// ---------- Rig de cámara ----------
+const followTarget = new THREE.Vector3();
+const smoothedTarget = player.position.clone().setY(1.4);
+const camState = {
+  yaw: player.rotation.y + Math.PI,
+  pitch: profile.defaultPitch,
+  preferredDistance: profile.defaultDistance,
+  actualDistance: profile.defaultDistance,
+  recentering: false, recenterFrom: 0, recenterTo: 0, recenterT: 0,
+};
+
+/* ============================================================================
+   APERTURA / CIERRE
+   ========================================================================== */
+const playerBox = new THREE.Box3();
+const PLAYER_RADIUS = 0.35;
+const _pbCenter = new THREE.Vector3(), _pbSize = new THREE.Vector3();
+function setPlayerBox(x, y, z) {
+  playerBox.setFromCenterAndSize(
+    _pbCenter.set(x, y + 0.9, z),
+    _pbSize.set(PLAYER_RADIUS * 2, 1.8, PLAYER_RADIUS * 2));
+}
+
+function nearestOpenable(filter = null) {
+  let best = null, bestD = Infinity;
+  for (const o of openables) {
+    if (filter && !filter(o)) continue;
+    const d = Math.hypot(o.center.x - player.position.x, o.center.z - player.position.z);
+    if (d < o.range && d < bestD) { bestD = d; best = o; }
+  }
+  return best;
+}
+
+let toast = '', toastT = 0;
+function toggleNearestDoor() {
+  if (nearLever()) { pullLever(); return; }
+  const o = nearestOpenable();
+  if (!o) { toast = 'No hay nada que abrir aquí'; toastT = 1.6; return; }
+  if (!o.open) {
+    if (o.requires) {
+      if (carriedProp !== o.requires) {
+        toast = `${o.label}: bloqueada, hace falta la ${o.requires.name}`; toastT = 2.2; return;
+      }
+      o.requires = null;
+      toast = `Tarjeta aceptada · Abriendo: ${o.label}`;
+    } else {
+      toast = `Abriendo: ${o.label}`;
+    }
+    o.open = true;
+    o.liveBox.makeEmpty();                       // la hoja abierta deja de colisionar
+  } else {
+    setPlayerBox(player.position.x, player.position.y, player.position.z);
+    const blocked = playerBox.intersectsBox(o.closedBox) ||
+      props.some(p => !p.carried && propBoxOf(p).intersectsBox(o.closedBox));
+    if (blocked) { toast = 'El hueco está ocupado'; toastT = 1.6; return; }
+    o.open = false;
+    toast = `Cerrando: ${o.label}`;
+  }
+  toastT = 1.8;
+}
+
+function updateOpenables(dt) {
+  for (const o of openables) {
+    const k = 1 - Math.exp(-o.speed * dt);
+    let settled = true;
+    for (const l of o.leaves) {
+      const target = o.open ? l.angle : 0;
+      l.pivot.rotation.y += (target - l.pivot.rotation.y) * k;
+      if (Math.abs(l.pivot.rotation.y) > 0.02) settled = false;
+    }
+    if (!o.open && settled && o.liveBox.isEmpty()) {
+      for (const l of o.leaves) l.pivot.rotation.y = 0;
+      o.liveBox.copy(o.closedBox);               // al quedar cerrada vuelve a frenar
+    }
+  }
+}
+
+/* ============================================================================
+   ENTRADA
+   ========================================================================== */
+const keys = {};
+addEventListener('keydown', e => {
+  if (inputLocked) return;
+  keys[e.code] = true;
+  setBtnPressed(e.code, true);
+  if (e.code === 'Space') e.preventDefault();
+  if (e.repeat) return;
+  if (e.code === 'KeyR') startRecenter();
+  if (e.code === 'KeyE') toggleGrab();
+  if (e.code === 'KeyF') toggleNearestDoor();
+  if (e.code === 'KeyQ') disconnectNearestRobot();
+  if (e.code === 'KeyC') toggleCameraMode();
+  if (e.code === 'AltLeft') { document.exitPointerLock(); e.preventDefault(); }
+});
+addEventListener('keyup', e => { keys[e.code] = false; setBtnPressed(e.code, false); });
+
+let camMode = 'tpp';
+let mouseDragging = false, userRotating = false;
+function toggleCameraMode() {
+  camMode = camMode === 'tpp' ? 'orbit' : 'tpp';
+  if (camMode === 'tpp') startRecenter(); else document.exitPointerLock();
+}
+renderer.domElement.addEventListener('click', () => {
+  if (camMode === 'tpp' && matchMedia('(pointer: fine)').matches)
+    renderer.domElement.requestPointerLock();
+});
+renderer.domElement.addEventListener('mousedown', () => { if (camMode === 'orbit') mouseDragging = true; });
+addEventListener('mouseup', () => { mouseDragging = false; userRotating = false; });
+addEventListener('mousemove', e => {
+  if (inputLocked) return;
+  const locked = document.pointerLockElement === renderer.domElement;
+  if (!locked && !mouseDragging) return;
+  userRotating = !locked;
+  camState.yaw -= e.movementX * profile.horizontalSensitivity;
+  camState.pitch = THREE.MathUtils.clamp(
+    camState.pitch + e.movementY * profile.verticalSensitivity, profile.minPitch, profile.maxPitch);
+  camState.recentering = false;
+});
+addEventListener('wheel', e => {
+  camState.preferredDistance = THREE.MathUtils.clamp(
+    camState.preferredDistance + Math.sign(e.deltaY) * profile.zoomStep,
+    profile.minDistance, profile.maxDistance);
+});
+
+const joyEl = document.getElementById('joy'), thumbEl = document.getElementById('joyThumb');
+if (matchMedia('(pointer: coarse)').matches) joyEl.style.display = 'block';
+let lastTX = 0, lastTY = 0, pinchD = 0;
+const cv = renderer.domElement;
+cv.addEventListener('touchstart', e => {
+  e.preventDefault();
+  joyEl.style.display = 'block';
+  if (e.touches.length === 1) { lastTX = e.touches[0].clientX; lastTY = e.touches[0].clientY; }
+  else if (e.touches.length === 2) pinchD = Math.hypot(
+    e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+}, { passive: false });
+cv.addEventListener('touchmove', e => {
+  e.preventDefault();
+  if (inputLocked) return;
+  if (e.touches.length === 1) {
+    const t = e.touches[0];
+    camState.yaw -= (t.clientX - lastTX) * 0.006;
+    camState.pitch = THREE.MathUtils.clamp(
+      camState.pitch + (t.clientY - lastTY) * 0.005, profile.minPitch, profile.maxPitch);
+    lastTX = t.clientX; lastTY = t.clientY;
+    camState.recentering = false; userRotating = true;
+  } else if (e.touches.length === 2) {
+    const d = Math.hypot(
+      e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+    if (d > 1) {
+      camState.preferredDistance = THREE.MathUtils.clamp(
+        camState.preferredDistance * (pinchD / d), profile.minDistance, profile.maxDistance);
+      pinchD = d;
+    }
+  }
+}, { passive: false });
+cv.addEventListener('touchend', e => { if (e.touches.length === 0) userRotating = false; }, { passive: false });
+
+const joy = { x: 0, y: 0 };
+let joyId = null, joyT0 = 0, joyMoved = false, jumpQueued = false;
+const JOY_R = 44;
+joyEl.addEventListener('touchstart', e => {
+  e.preventDefault();
+  const t = e.changedTouches[0];
+  joyId = t.identifier; joyT0 = performance.now(); joyMoved = false;
+}, { passive: false });
+joyEl.addEventListener('touchmove', e => {
+  e.preventDefault();
+  if (inputLocked) return;
+  const r = joyEl.getBoundingClientRect();
+  for (const t of e.changedTouches) {
+    if (t.identifier !== joyId) continue;
+    let dx = (t.clientX - (r.left + r.width / 2)) / JOY_R;
+    let dy = (t.clientY - (r.top + r.height / 2)) / JOY_R;
+    const m = Math.hypot(dx, dy);
+    if (m > 1) { dx /= m; dy /= m; }
+    joy.x = dx; joy.y = dy;
+    if (m > 0.25) joyMoved = true;
+    thumbEl.style.transform = `translate(calc(-50% + ${dx * JOY_R}px), calc(-50% + ${dy * JOY_R}px))`;
+  }
+}, { passive: false });
+const joyRelease = e => {
+  for (const t of e.changedTouches) {
+    if (t.identifier !== joyId) continue;
+    if (!joyMoved && performance.now() - joyT0 < 250) jumpQueued = true;
+    joyId = null; joy.x = joy.y = 0;
+    thumbEl.style.transform = 'translate(-50%,-50%)';
+  }
+};
+joyEl.addEventListener('touchend', joyRelease, { passive: false });
+joyEl.addEventListener('touchcancel', joyRelease, { passive: false });
+
+const btnMap = { Space: 'btnJump', KeyE: 'btnGrab', KeyF: 'btnDoor', KeyC: 'btnCam', KeyQ: 'btnZap' };
+function setBtnPressed(code, on) {
+  const id = btnMap[code];
+  if (id) document.getElementById(id).classList.toggle('pressed', on);
+}
+function bindButton(id, down, up) {
+  const el = document.getElementById(id);
+  el.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    if (inputLocked) return;
+    el.classList.add('pressed'); down();
+  });
+  const release = () => { el.classList.remove('pressed'); if (up) up(); };
+  el.addEventListener('pointerup', release);
+  el.addEventListener('pointercancel', release);
+  el.addEventListener('pointerleave', release);
+}
+bindButton('btnJump', () => keys.Space = true, () => keys.Space = false);
+bindButton('btnGrab', () => toggleGrab());
+bindButton('btnDoor', () => toggleNearestDoor());
+bindButton('btnZap', () => disconnectNearestRobot());
+bindButton('btnCam', () => toggleCameraMode());
+
+function startRecenter() {
+  camState.recentering = true;
+  camState.recenterT = 0;
+  camState.recenterFrom = camState.yaw;
+  const target = player.rotation.y + Math.PI;
+  const delta = ((target - camState.yaw + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+  camState.recenterTo = camState.yaw + delta;
+}
+
+/* ============================================================================
+   CÁMARA: colisión y fundido de muros
+   ========================================================================== */
+const raycaster = new THREE.Raycaster();
+raycaster.layers.set(CAMERA_COLLISION_LAYER);
+const rayOffsets = [
+  new THREE.Vector3(0, 0, 0),
+  new THREE.Vector3(0, profile.collisionRadius, 0),
+  new THREE.Vector3(0, -profile.collisionRadius, 0),
+];
+const _dir = new THREE.Vector3(), _origin = new THREE.Vector3(), _side = new THREE.Vector3();
+const _up = new THREE.Vector3(0, 1, 0);
+
+function resolveCameraDistance(from, desiredPos) {
+  _dir.subVectors(desiredPos, from);
+  const desired = _dir.length();
+  _dir.normalize();
+  _side.crossVectors(_dir, _up).normalize().multiplyScalar(profile.collisionRadius);
+  let allowed = desired;
+  const offsets = [...rayOffsets, _side.clone(), _side.clone().negate()];
+  for (const off of offsets) {
+    _origin.copy(from).add(off);
+    raycaster.set(_origin, _dir);
+    raycaster.far = desired;
+    const hit = raycaster.intersectObjects(cameraColliders, false)[0];
+    if (hit) allowed = Math.min(allowed, hit.distance - profile.collisionMargin);
+  }
+  return Math.max(allowed, 0.4);
+}
+
+const obstructionTimers = new Map();
+function updateWallFading(dt) {
+  _dir.subVectors(smoothedTarget, camera.position);
+  const dist = _dir.length();
+  _dir.normalize();
+  raycaster.set(camera.position, _dir);
+  raycaster.far = dist;
+  const hits = new Set(raycaster.intersectObjects(cameraColliders, false).map(h => h.object));
+  for (const mesh of cameraColliders) {
+    if (!mesh.userData.cameraFadeable) continue;
+    const t = THREE.MathUtils.clamp(
+      (obstructionTimers.get(mesh) ?? 0) + (hits.has(mesh) ? dt : -dt), 0, 0.5);
+    obstructionTimers.set(mesh, t);
+    const targetOpacity = t > profile.fadeObstructionDelay ? profile.fadeMinOpacity : 1;
+    mesh.material.opacity += (targetOpacity - mesh.material.opacity) * (1 - Math.exp(-12 * dt));
+  }
+}
+
+/* ============================================================================
+   MOVIMIENTO DEL PERSONAJE
+   ========================================================================== */
+const camForward = new THREE.Vector3(), camRight = new THREE.Vector3();
+const moveDir = new THREE.Vector3(), nextPos = new THREE.Vector3();
+let playerVelY = 0, playerGrounded = true;
+
+function updatePlayer(dt) {
+  const wasGrounded = playerGrounded;
+
+  // --- Eje vertical: salto, gravedad y apoyo sobre suelos y muebles ---
+  if ((keys.Space || jumpQueued) && playerGrounded) playerVelY = profile.jumpSpeed;
+  jumpQueued = false;
+  playerVelY -= profile.gravity * dt;
+  const prevY = player.position.y;
+  player.position.y += playerVelY * dt;
+  playerGrounded = false;
+  setPlayerBox(player.position.x, player.position.y, player.position.z);
+  for (const b of wallBoxes) {
+    if (!b.intersectsBox(playerBox)) continue;
+    if (playerVelY <= 0 && prevY >= b.max.y - 0.06) {
+      player.position.y = b.max.y + GEPS;        // aterriza encima
+      playerVelY = 0; playerGrounded = true;
+    } else {
+      player.position.y = prevY;                 // golpea de lado o con la cabeza
+      if (playerVelY > 0) playerVelY = 0;
+    }
+    setPlayerBox(player.position.x, player.position.y, player.position.z);
+  }
+  if (player.position.y < -9) {                  // red de seguridad
+    player.position.copy(SPAWN); playerVelY = 0;
+    toast = 'Te has caído: vuelta al acceso principal'; toastT = 2.2;
+  }
+
+  // --- Dirección deseada (teclado + joystick analógico) ---
+  const v = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0) - joy.y;
+  const h = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0) + joy.x;
+  const mag = Math.min(Math.hypot(h, v), 1);
+  if (mag >= 0.05) {
+    camera.getWorldDirection(camForward);
+    camForward.y = 0; camForward.normalize();
+    camRight.crossVectors(camForward, player.up).normalize();
+    moveDir.set(0, 0, 0).addScaledVector(camForward, v).addScaledVector(camRight, h).normalize();
+
+    const run = keys.ShiftLeft || Math.hypot(joy.x, joy.y) > 0.95;
+    const speed = (run ? profile.runSpeed : profile.walkSpeed) * mag;
+
+    const targetYaw = Math.atan2(moveDir.x, moveDir.z);
+    const dYaw = ((targetYaw - player.rotation.y + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+    const maxStep = profile.turnSpeed * dt;
+    player.rotation.y += THREE.MathUtils.clamp(dYaw, -maxStep, maxStep);
+
+    // Colisión por eje (permite deslizar a lo largo de los muros). Si un eje
+    // queda bloqueado por algo de poca altura, se sube el escalón.
+    for (const axis of ['x', 'z']) {
+      nextPos.copy(player.position);
+      nextPos[axis] += moveDir[axis] * speed * dt;
+      setPlayerBox(nextPos.x, nextPos.y, nextPos.z);
+      if (!wallBoxes.some(b => b.intersectsBox(playerBox))) {
+        player.position[axis] = nextPos[axis];
+        continue;
+      }
+      if (!playerGrounded) continue;
+      let topY = -Infinity;
+      for (const b of wallBoxes) if (b.intersectsBox(playerBox)) topY = Math.max(topY, b.max.y);
+      const rise = topY - player.position.y;
+      if (rise <= 0 || rise > profile.stepHeight) continue;
+      setPlayerBox(nextPos.x, topY + GEPS, nextPos.z);
+      if (!wallBoxes.some(b => b.intersectsBox(playerBox))) {
+        player.position[axis] = nextPos[axis];
+        player.position.y = topY + GEPS;
+      }
+    }
+  }
+
+  // --- Pegado al suelo al bajar escalones (evita el salto en cada peldaño) ---
+  if (wasGrounded && !playerGrounded && playerVelY <= 0) {
+    setPlayerBox(player.position.x, player.position.y - profile.snapDown, player.position.z);
+    let topY = -Infinity;
+    for (const b of wallBoxes)
+      if (b.max.y <= player.position.y + 0.02 && b.intersectsBox(playerBox))
+        topY = Math.max(topY, b.max.y);
+    if (topY > -Infinity) {
+      player.position.y = topY + GEPS;
+      playerVelY = 0; playerGrounded = true;
+    }
+  }
+}
+
+/* ============================================================================
+   COGER / SOLTAR Y FÍSICA DE OBJETOS
+   ========================================================================== */
+let carriedProp = null;
+const _sep = new THREE.Vector3(), _rollAxis = new THREE.Vector3();
+const propBox = new THREE.Box3(), _propSize = new THREE.Vector3();
+
+function propBoxOf(p) {
+  _propSize.set(p.radius * 2, p.halfHeight * 2, p.radius * 2);
+  return propBox.setFromCenterAndSize(p.mesh.position, _propSize);
+}
+
+// Lanzamiento del lingote: sale a 1,1 m de altura casi recto, así que la
+// distancia decide dónde golpea: hasta ~2,6 m → cabeza, ~2,6–3,5 m → cuerpo,
+// ~3,5–4,4 m → orugas (ya en el suelo, resbalando).
+const THROW = { speed: 7, up: 0.5 };
+
+function toggleGrab() {
+  if (carriedProp) {
+    const c = nearestOpenable(o => o.dropSpot && o.open);
+    if (c) {
+      carriedProp.mesh.position.copy(c.dropSpot);   // suelta asistida dentro del mueble
+      carriedProp.vel.set(0, 0, 0);
+    } else {
+      if (wallBoxes.some(b => b.intersectsBox(propBoxOf(carriedProp))))
+        carriedProp.mesh.position.set(player.position.x, player.position.y + 1.1, player.position.z);
+      // Un lingote se lanza (lingotazo); el resto de objetos se sueltan con un leve impulso.
+      const throwIt = carriedProp.name === 'lingote de oro';
+      carriedProp.vel.set(Math.sin(player.rotation.y), 0, Math.cos(player.rotation.y))
+        .multiplyScalar(throwIt ? THROW.speed : 2).setY(throwIt ? THROW.up : 1.2);
+      carriedProp.thrown = throwIt;
+    }
+    toast = carriedProp.thrown ? 'Lanzas el lingote' : `Sueltas: ${carriedProp.name}`; toastT = 1.4;
+    carriedProp.carried = false;
+    carriedProp = null;
+    return;
+  }
+  let best = null, bestD = profile.grabRange;
+  for (const p of props) {
+    // Un objeto dentro de un mueble cerrado no se alcanza a través de la puerta
+    if (openables.some(o => o.outerBox && !o.open && o.outerBox.containsPoint(p.mesh.position))) continue;
+    const d = p.mesh.position.distanceTo(player.position);
+    if (d < bestD) { best = p; bestD = d; }
+  }
+  if (best) {
+    carriedProp = best; best.carried = true; best.vel.set(0, 0, 0);
+    toast = `Coges: ${best.name}`; toastT = 1.4;
+  }
+}
+
+function landProp(p, topY) {
+  p.mesh.position.y = topY + p.halfHeight + GEPS;
+  p.vel.y = (p.shape === 'sphere' && p.vel.y < -1.5) ? -p.vel.y * 0.45 : 0;
+  p.grounded = true;
+}
+
+function updateProps(dt) {
+  for (const p of props) {
+    if (p.carried) {
+      p.mesh.position.set(
+        player.position.x + Math.sin(player.rotation.y) * 0.7,
+        player.position.y + 1.1,
+        player.position.z + Math.cos(player.rotation.y) * 0.7);
+      p.mesh.rotation.set(0, player.rotation.y, 0);
+      continue;
+    }
+    // Empujón al caminar contra el objeto: solo velocidad; la posición la
+    // resuelve la colisión de abajo, así nunca atraviesa nada.
+    _sep.subVectors(p.mesh.position, player.position); _sep.y = 0;
+    const d = _sep.length(), minD = PLAYER_RADIUS + p.radius;
+    if (d < minD && d > 1e-4 && p.mesh.position.y - player.position.y < 1.4) {
+      _sep.divideScalar(d);
+      p.vel.x = _sep.x * 2.5; p.vel.z = _sep.z * 2.5;
+    }
+
+    p.grounded = false;
+    _propSize.set(p.radius * 2, p.halfHeight * 2, p.radius * 2);
+    p.vel.y -= profile.gravity * dt;
+    let prev = p.mesh.position.y;
+    p.mesh.position.y += p.vel.y * dt;
+    propBox.setFromCenterAndSize(p.mesh.position, _propSize);
+    for (const b of wallBoxes) {
+      if (!b.intersectsBox(propBox)) continue;
+      if (p.vel.y <= 0 && prev - p.halfHeight >= b.max.y - 0.06) landProp(p, b.max.y);
+      else { p.mesh.position.y = prev; p.vel.y = 0; }
+      propBox.setFromCenterAndSize(p.mesh.position, _propSize);
+    }
+    if (p.mesh.position.y < -9) { p.mesh.position.set(0, 1, 0); p.vel.set(0, 0, 0); }
+
+    for (const axis of ['x', 'z']) {
+      prev = p.mesh.position[axis];
+      p.mesh.position[axis] += p.vel[axis] * dt;
+      propBox.setFromCenterAndSize(p.mesh.position, _propSize);
+      if (wallBoxes.some(b => b.intersectsBox(propBox))) {
+        p.mesh.position[axis] = prev;
+        p.vel[axis] *= -0.3;
+      }
+    }
+
+    if (p.grounded) {
+      const damp = Math.exp(-(p.shape === 'sphere' ? 1.2 : 7) * dt);
+      p.vel.x *= damp; p.vel.z *= damp;
+      if (p.shape === 'sphere') {
+        const sp = Math.hypot(p.vel.x, p.vel.z);
+        if (sp > 0.02) {
+          _rollAxis.set(p.vel.z, 0, -p.vel.x).normalize();
+          p.mesh.rotateOnWorldAxis(_rollAxis, sp * dt / p.radius);
+        }
+      }
+    }
+  }
+  for (let i = 0; i < props.length; i++) for (let j = i + 1; j < props.length; j++) {
+    const a = props[i], b = props[j];
+    if (a.carried || b.carried) continue;
+    if (Math.abs(b.mesh.position.y - a.mesh.position.y) > a.halfHeight + b.halfHeight) continue;
+    _sep.subVectors(b.mesh.position, a.mesh.position); _sep.y = 0;
+    const d = _sep.length(), minD = a.radius + b.radius;
+    if (d < minD && d > 1e-4) {
+      _sep.divideScalar(d).multiplyScalar(Math.min((minD - d) * 10, 1.5));
+      a.vel.x -= _sep.x; a.vel.z -= _sep.z;
+      b.vel.x += _sep.x; b.vel.z += _sep.z;
+    }
+  }
+}
+
+/* ============================================================================
+   ROBOTS SAQUEADORES: DESCONECTADOR (Q) Y PALANQUETA (CONTACTO)
+   Al abrirse la 2.ª bóveda salta la alarma: cada pocos segundos se abre un
+   agujero en el suelo de la cámara del oro, sube un robot, va a un palé, coge
+   un lingote y vuelve a hundirse con él. Al pararlo suelta el lingote (cogible):
+   - desconectador en la mano + Q a menos de ZAP_RANGE: apagado limpio;
+   - palanqueta en la mano: basta con tocarlo, y el fallo depende de cómo:
+       saltando encima → se le salta el muelle de la cabeza,
+       girando (barrido) → se le atasca la oruga y hace la peonza,
+       de frente → cortocircuito;
+   - lingotazo (lingote lanzado con E): el fallo depende de dónde le da:
+       cabeza → mareado, ve las estrellas,
+       cuerpo → se desmonta en piezas,
+       orugas → resbala y cae de espaldas pataleando.
+   Después el robot inerte se desvanece. Sin violencia.
+   ========================================================================== */
+const ROBOT = { speed: 1.25, depth: 1.45, maxActive: 3, loadTime: 1.2 };
+const ZAP_RANGE = 2.0;
+const FAIL_TEXT = {
+  zap: 'Robot desconectado',
+  short: '¡Cortocircuito! Echa humo por las orejas',
+  spring: '¡Boing! Se le ha saltado el muelle de la cabeza',
+  spin: 'Oruga atascada: da vueltas como una peonza y se vuelca',
+  dizzy: '¡Lingotazo en la cabeza! Ve las estrellas',
+  apart: '¡Lingotazo en la barriga! Se desmonta en piezas',
+  beetle: '¡Lingotazo en las orugas! Resbala y cae de espaldas pataleando',
+};
+const FAIL_KIND = { zap: 'zap', short: 'crowbar', spring: 'crowbar', spin: 'crowbar',
+                    dizzy: 'bar', apart: 'bar', beetle: 'bar' };
+const raid = { active: false, timer: 0, stolen: 0, saved: 0, spawned: 0,
+               byKind: { zap: 0, crowbar: 0, bar: 0 }, byFail: Object.fromEntries(Object.keys(FAIL_KIND).map(k => [k, 0])) };
+const robots = [], fx = [];
+let goldLeft = goldXforms.length;
+const _zeroM = new THREE.Matrix4().makeScale(0, 0, 0);
+
+// Agujeros en pasillos libres de la cámara. Las rutas agujero → palé se
+// calculan una vez: solo valen las que van en línea recta sin tocar nada.
+const HOLE_SPOTS = [[-6.5, 0], [6.5, 0], [0, -3.5], [0, 3.5],
+                    [-6.6, -6.6], [6.6, 6.6], [-3.5, 6.6], [3.5, -6.6]];
+const holeRimMat = new THREE.MeshStandardMaterial({ color: 0x3a2412, emissive: 0xff7a2a, emissiveIntensity: 1.2 });
+const holeMat = new THREE.MeshBasicMaterial({ color: 0x020202 });
+const _probe = new THREE.Box3(), _probeC = new THREE.Vector3(), _probeS = new THREE.Vector3(0.6, 1.0, 0.6);
+function pathClear(ax, az, bx, bz) {
+  const n = Math.max(1, Math.ceil(Math.hypot(bx - ax, bz - az) / 0.15));
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    _probe.setFromCenterAndSize(_probeC.set(ax + (bx - ax) * t, 0.55, az + (bz - az) * t), _probeS);
+    if (wallBoxes.some(b => b.intersectsBox(_probe))) return false;
+  }
+  return true;
+}
+const holes = HOLE_SPOTS.map(([x, z]) => {
+  const g = new THREE.Group();
+  const pit = new THREE.Mesh(new THREE.CircleGeometry(0.5, 32), holeMat);
+  const rim = new THREE.Mesh(new THREE.RingGeometry(0.5, 0.6, 32), holeRimMat);
+  for (const m of [pit, rim]) { m.rotation.x = -Math.PI / 2; g.add(m); }
+  rim.position.y = 0.002;
+  g.position.set(x, 0.012, z);
+  g.scale.setScalar(0.001);
+  g.visible = false;
+  scene.add(g);
+  const routes = [];
+  for (const p of pallets) {
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const sx = p.cx + dx * (p.hw + 0.4), sz = p.cz + dz * (p.hd + 0.4);
+      if (pathClear(x, z, sx, sz)) routes.push({ pallet: p, x: sx, z: sz, face: Math.atan2(-dx, -dz) });
+    }
+  }
+  return { x, z, g, open: 0, busy: false, routes };
+});
+
+// Muelle helicoidal de altura 1 (se escala en Y) para el fallo de la cabeza.
+const springGeo = (() => {
+  const pts = [];
+  for (let i = 0; i <= 120; i++) {
+    const a = i / 120 * Math.PI * 2 * 7;
+    pts.push(new THREE.Vector3(Math.cos(a) * 0.07, i / 120, Math.sin(a) * 0.07));
+  }
+  return new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 240, 0.012, 6);
+})();
+
+function buildRobot() {
+  const g = new THREE.Group();
+  const mats = [];
+  const M = (o) => { const m = new THREE.MeshStandardMaterial(o); mats.push(m); return m; };
+  const shell = M({ color: 0xc7d0da, metalness: 0.55, roughness: 0.38 });
+  const dark = M({ color: 0x2a2f36, roughness: 0.6, metalness: 0.3 });
+  const eye = M({ color: 0x331500, emissive: 0xff6a2a, emissiveIntensity: 2.2 });
+  const led = M({ color: 0x330000, emissive: 0xff3322, emissiveIntensity: 3 });
+  const goldM = M({ color: 0xffc247, metalness: 0.9, roughness: 0.26 });
+  const box = (parent, w, h, d, x, y, z, m) => {
+    const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m);
+    b.position.set(x, y, z); b.castShadow = true; parent.add(b); return b;
+  };
+  const treads = [box(g, 0.16, 0.18, 0.6, -0.22, 0.09, 0, dark),   // orugas
+                  box(g, 0.16, 0.18, 0.6,  0.22, 0.09, 0, dark)];
+  const torso = new THREE.Group(); torso.position.y = 0.2; g.add(torso);
+  box(torso, 0.5, 0.55, 0.42, 0, 0.3, 0, shell);           // cuerpo
+  const arms = [box(torso, 0.05, 0.05, 0.28, -0.17, 0.36, 0.3, dark),   // brazos
+                box(torso, 0.05, 0.05, 0.28,  0.17, 0.36, 0.3, dark)];
+  // Cabeza en su propio grupo, con el origen en su base (y = 0.6 del torso).
+  const head = new THREE.Group(); head.position.y = 0.6; torso.add(head);
+  box(head, 0.36, 0.24, 0.3, 0, 0.12, 0, shell);
+  box(head, 0.28, 0.07, 0.02, 0, 0.14, 0.16, eye);         // visor
+  const ant = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.2, 6), dark);
+  ant.position.y = 0.34; head.add(ant);
+  const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.04, 10, 8), led);
+  bulb.position.y = 0.45; head.add(bulb);
+  const spring = new THREE.Mesh(springGeo, dark);          // oculto hasta que salta
+  spring.position.y = 0.58; spring.visible = false; torso.add(spring);
+  const bar = box(torso, 0.13, 0.1, 0.3, 0, 0.42, 0.38, goldM);   // lingote entre los brazos
+  bar.visible = false;
+  g.rotation.order = 'YXZ';                     // los vuelcos (X, Z) son locales al rumbo (Y)
+  return { g, torso, head, spring, treads, arms, mats, eye, led, bar };
+}
+
+function spawnRobot() {
+  const free = holes.filter(h => !h.busy && h.open < 0.05 &&
+    Math.hypot(h.x - player.position.x, h.z - player.position.z) > 2.5);
+  if (!free.length) return false;
+  const hole = free[(Math.random() * free.length) | 0];
+  const routes = hole.routes.filter(r => r.pallet.bars.length);
+  if (!routes.length) return false;
+  const route = routes[(Math.random() * routes.length) | 0];
+  const r = { ...buildRobot(), hole, route, state: 'emerge', t: 0, carrying: false, fail: null, fxT: 0 };
+  r.g.position.set(hole.x, -ROBOT.depth, hole.z);
+  r.g.rotation.y = Math.atan2(route.x - hole.x, route.z - hole.z);
+  scene.add(r.g);
+  hole.busy = true;
+  robots.push(r);
+  raid.spawned++;
+  toast = raid.spawned === 1
+    ? '¡Alarma! Algo perfora el suelo de la cámara del oro'
+    : 'Se abre otro agujero en la cámara del oro';
+  toastT = 2.4;
+  return true;
+}
+
+// Robots que aún se pueden parar: activos y fuera del agujero lo bastante.
+const zappable = r => r.state !== 'off' && r.state !== 'fade' && r.g.position.y > -0.6;
+const robotTool = () => carriedProp === zapper || carriedProp === crowbar ? carriedProp : null;
+function nearestRobot() {
+  let best = null, bestD = ZAP_RANGE;
+  for (const r of robots) {
+    if (!zappable(r)) continue;
+    const d = Math.hypot(r.g.position.x - player.position.x, r.g.position.z - player.position.z);
+    if (d < bestD && Math.abs(r.g.position.y - player.position.y) < 1.8) { bestD = d; best = r; }
+  }
+  return best;
+}
+
+/* ---------- Partículas: anillo del desconectador, chispas y humo ---------- */
+const sparkGeo = new THREE.BoxGeometry(0.03, 0.03, 0.03);
+const smokeGeo = new THREE.SphereGeometry(0.12, 10, 8);
+const ringGeo = new THREE.TorusGeometry(0.5, 0.03, 8, 32);
+function addFx(geo, mat, x, y, z, { vel = null, grav = 0, grow = 0, life = 0.5, rotX = 0 } = {}) {
+  mat.transparent = true;
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.set(x, y, z);
+  mesh.rotation.x = rotX;
+  scene.add(mesh);
+  fx.push({ mesh, vel, grav, grow, life, t: 0 });
+}
+function sparks(x, y, z, n) {
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * Math.PI * 2, s = 1 + Math.random() * 2;
+    addFx(sparkGeo, new THREE.MeshBasicMaterial({ color: Math.random() < 0.5 ? 0xcff6ff : 0xfff1a0 }),
+      x, y, z, { vel: new THREE.Vector3(Math.cos(a) * s, 1.5 + Math.random() * 2.5, Math.sin(a) * s),
+                 grav: 9, life: 0.35 + Math.random() * 0.35 });
+  }
+}
+function smokePuff(x, y, z) {
+  addFx(smokeGeo, new THREE.MeshStandardMaterial({ color: 0x6d7076, roughness: 1 }),
+    x + (Math.random() - 0.5) * 0.1, y, z + (Math.random() - 0.5) * 0.1,
+    { vel: new THREE.Vector3((Math.random() - 0.5) * 0.3, 0.7, (Math.random() - 0.5) * 0.3),
+      grow: 1.8, life: 1.6 });
+}
+function updateFx(dt) {
+  for (const f of [...fx]) {
+    f.t += dt;
+    if (f.vel) { f.mesh.position.addScaledVector(f.vel, dt); f.vel.y -= f.grav * dt; }
+    if (f.grow) f.mesh.scale.setScalar(1 + f.t * f.grow);
+    f.mesh.material.opacity = Math.max(0, 1 - f.t / f.life);
+    if (f.t >= f.life) {
+      scene.remove(f.mesh); f.mesh.material.dispose();
+      fx.splice(fx.indexOf(f), 1);
+    }
+  }
+}
+
+function eyesOff(r) {
+  r.dead = true;
+  r.eye.emissiveIntensity = 0; r.led.emissiveIntensity = 0;
+  r.eye.color.set(0x222222); r.led.color.set(0x222222);
+}
+
+function disconnectNearestRobot() {
+  if (carriedProp === crowbar) { toast = 'Con la palanqueta no hace falta Q: toca al robot'; toastT = 1.8; return; }
+  if (carriedProp !== zapper) { toast = 'Q sirve con el desconectador en la mano'; toastT = 1.8; return; }
+  const r = nearestRobot();
+  if (!r) { toast = 'No hay ningún robot al alcance'; toastT = 1.6; return; }
+  stopRobot(r, 'zap');
+}
+
+// Palanqueta por contacto. Toca el cuerpo del personaje o la propia palanqueta
+// (que se lleva 0,7 m por delante). El giro se mide con la velocidad angular
+// del personaje, que decae en ~0,2 s para dar margen al barrido.
+const CROWBAR = { bodyReach: 0.75, toolReach: 0.5, stompReach: 0.7, spinRate: 4, bounce: 5.5 };
+let _lastYaw = null, spinMeter = 0;
+function crowbarContact(dt) {
+  const yaw = player.rotation.y;
+  if (_lastYaw !== null && dt > 0) {
+    const d = ((yaw - _lastYaw + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+    spinMeter = Math.max(spinMeter * Math.exp(-6 * dt), Math.abs(d) / dt);
+  }
+  _lastYaw = yaw;
+  if (carriedProp !== crowbar) return;
+
+  const pp = player.position, tp = crowbar.mesh.position;
+  const airborne = !playerGrounded && pp.y > 0.25;
+  for (const r of robots) {
+    if (!zappable(r)) continue;
+    const rp = r.g.position;
+    const dBody = Math.hypot(rp.x - pp.x, rp.z - pp.z);
+    if (airborne) {                                  // en el aire solo cuenta caer encima
+      if (playerVelY < 0 && dBody < CROWBAR.stompReach) {
+        stopRobot(r, 'spring');
+        playerVelY = CROWBAR.bounce;                 // rebote sobre la cabeza
+      }
+      continue;
+    }
+    const dTool = Math.hypot(rp.x - tp.x, rp.z - tp.z);
+    if (dBody < CROWBAR.bodyReach || dTool < CROWBAR.toolReach)
+      stopRobot(r, spinMeter > CROWBAR.spinRate ? 'spin' : 'short');
+  }
+}
+
+function stopRobot(r, fail) {
+  r.state = 'off'; r.t = 0; r.fail = fail; r.fxT = 0;
+  r.hole.busy = false;                              // el agujero se cierra
+  raid.byKind[FAIL_KIND[fail]]++;
+  blockLog.push({ t: gameTime, kind: FAIL_KIND[fail] });
+  raid.byFail[fail]++;
+  const p = r.g.position, baseY = Math.max(0, p.y);
+  if (fail === 'zap') {
+    eyesOff(r);
+    addFx(ringGeo, new THREE.MeshBasicMaterial({ color: 0x7fe9ff }), p.x, baseY + 0.7, p.z,
+      { grow: 4, life: 0.45, rotX: Math.PI / 2 });
+  } else {
+    sparks(p.x, baseY + 0.6, p.z, 10);
+  }
+  if (fail === 'dizzy') {                           // estrellas girando sobre la cabeza
+    const m = new THREE.MeshStandardMaterial({ color: 0xffe066, emissive: 0xffc61a, emissiveIntensity: 1.5 });
+    r.mats.push(m);
+    r.stars = new THREE.Group();
+    r.stars.position.y = 1.18;
+    for (let i = 0; i < 3; i++) {
+      const st = new THREE.Mesh(new THREE.OctahedronGeometry(0.055), m);
+      const a = i / 3 * Math.PI * 2;
+      st.position.set(Math.cos(a) * 0.24, 0, Math.sin(a) * 0.24);
+      r.stars.add(st);
+    }
+    r.torso.add(r.stars);
+  } else if (fail === 'apart') {                    // piezas sueltas (en ejes del torso)
+    const R = () => Math.random() - 0.5;
+    r.pieces = [
+      { obj: r.head, vel: new THREE.Vector3(R() * 1.2, 2.8, -0.6), spin: new THREE.Vector3(R() * 8, R() * 6, 6),
+        rest: 0.18, restRot: new THREE.Euler(0, Math.random() * 3, Math.PI / 2) },
+      ...r.arms.map((a, i) => ({ obj: a, vel: new THREE.Vector3((i ? 1 : -1) * 1.3, 1.2, 0.9 + R()),
+        spin: new THREE.Vector3(R() * 10, R() * 10, R() * 10), rest: 0.025,
+        restRot: new THREE.Euler(0, Math.random() * 3, 0) })),
+    ];
+  } else if (fail === 'beetle') {
+    r.slide = 2.4;                                   // resbalón hacia atrás
+  }
+  toast = FAIL_TEXT[fail];
+  if (r.carrying) {
+    r.carrying = false; r.bar.visible = false;
+    const dx = Math.sin(r.g.rotation.y), dz = Math.cos(r.g.rotation.y);
+    const b = looseBar(p.x + dx * 0.55, p.z + dz * 0.55, baseY + 0.3);
+    if (fail !== 'zap') b.vel.set(dx * 1.6, 3.2, dz * 1.6);   // con el fallo sale despedido
+    raid.saved++;
+    toast += ' · suelta el lingote';
+  }
+  toastT = 2.2;
+}
+
+function turnRobotTo(r, yaw, dt, rate = 10) {
+  const dYaw = ((yaw - r.g.rotation.y + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+  r.g.rotation.y += dYaw * (1 - Math.exp(-rate * dt));
+}
+
+function moveRobotTo(r, x, z, dt) {
+  const dx = x - r.g.position.x, dz = z - r.g.position.z, d = Math.hypot(dx, dz);
+  const step = ROBOT.speed * dt;
+  r.torso.position.y = 0.2;
+  if (d <= step) { r.g.position.x = x; r.g.position.z = z; return true; }
+  turnRobotTo(r, Math.atan2(dx, dz), dt);
+  r.g.position.x += dx / d * step; r.g.position.z += dz / d * step;
+  r.torso.position.y += Math.abs(Math.sin(r.t * 9)) * 0.025;     // traqueteo
+  return false;
+}
+
+function removeRobot(r) {
+  scene.remove(r.g);
+  r.g.traverse(o => { if (o.isMesh && o.geometry !== springGeo) o.geometry.dispose(); });
+  for (const m of r.mats) m.dispose();
+  robots.splice(robots.indexOf(r), 1);
+}
+
+/* ---------- Animaciones de parada ---------- */
+const OFF_TIME = 7;          // segundos inerte antes de desvanecerse
+function updateStopped(r, dt) {
+  const p = r.g.position, t = r.t, k = 1 - Math.exp(-5 * dt);
+  r.fxT -= dt;
+  switch (r.fail) {
+    case 'zap':                                      // apagado limpio: cabizbajo
+      p.y += (0 - p.y) * k;
+      r.torso.rotation.x += (0.32 - r.torso.rotation.x) * k;
+      r.torso.position.y += (0.16 - r.torso.position.y) * k;
+      break;
+
+    case 'short':                                    // cortocircuito: tiembla, parpadea, chispas y humo
+      p.y += (0 - p.y) * k;
+      if (t < 2.2) {
+        r.torso.position.x = (Math.random() - 0.5) * 0.04;
+        r.torso.rotation.z = (Math.random() - 0.5) * 0.08;
+        r.eye.emissiveIntensity = Math.random() < 0.45 ? 3.2 : 0;
+        r.led.emissiveIntensity = Math.random() < 0.3 ? 4 : 0;
+        if (r.fxT <= 0) {
+          r.fxT = 0.07;
+          sparks(p.x + (Math.random() - 0.5) * 0.4, p.y + 0.4 + Math.random() * 0.6,
+                 p.z + (Math.random() - 0.5) * 0.4, 2);
+          if (Math.random() < 0.35) smokePuff(p.x, p.y + 1.15, p.z);
+        }
+      } else {
+        if (!r.dead) { eyesOff(r); smokePuff(p.x, p.y + 1.15, p.z); }
+        r.torso.position.x = 0;
+        r.torso.rotation.z += (0.12 - r.torso.rotation.z) * k;   // se queda torcido
+        r.torso.rotation.x += (0.25 - r.torso.rotation.x) * k;
+        if (r.fxT <= 0 && t < 5) { r.fxT = 0.5; smokePuff(p.x, p.y + 1.1, p.z); }  // humea un rato
+      }
+      break;
+
+    case 'spring': {                                 // la cabeza sale disparada sobre un muelle
+      p.y += (0 - p.y) * k;
+      const lift = 0.55 * (1 - Math.exp(-3 * t) * Math.cos(13 * t));   // boing amortiguado
+      r.head.position.y = 0.6 + lift;
+      r.head.rotation.z = 0.55 * (1 - Math.exp(-1.5 * t)) + Math.sin(9 * t) * 0.35 * Math.exp(-1.2 * t);
+      r.head.rotation.x = Math.sin(6 * t) * 0.25 * Math.exp(-1 * t);
+      r.spring.visible = lift > 0.01;
+      r.spring.scale.y = Math.max(0.02, lift + 0.02);
+      r.spring.rotation.z = r.head.rotation.z * 0.5;
+      if (t < 0.8) r.led.emissiveIntensity = Math.sin(t * 40) > 0 ? 4 : 0;   // la antena parpadea
+      else if (!r.dead) eyesOff(r);
+      break;
+    }
+
+    case 'spin': {                                   // oruga atascada: peonza y vuelco
+      if (t < 1.6) {
+        r.g.rotation.y += (2 + 10 * t) * dt;         // ~2,5 vueltas cada vez más rápidas
+        p.y += (0 - p.y) * k;
+        if (r.fxT <= 0) { r.fxT = 0.12; sparks(p.x, p.y + 0.1, p.z, 1); }
+      } else {
+        const s = Math.min(1, (t - 1.6) / 0.45), e = s * s * (3 - 2 * s);
+        if (s >= 1 && !r.tipped) { r.tipped = true; smokePuff(p.x, 0.4, p.z); eyesOff(r); }
+        r.g.rotation.z = e * Math.PI / 2;            // se vuelca de lado
+        p.y = e * 0.3;                               // sin hundirse en el suelo
+        r.treads[1].position.z = r.tipped && t < 4 ? Math.sin(t * 30) * 0.03 : 0;  // la oruga de arriba sigue
+      }
+      break;
+    }
+
+    case 'dizzy': {                                  // mareado: cabeza en molinillo y estrellas
+      p.y += (0 - p.y) * k;
+      const sway = Math.exp(-0.45 * t);
+      r.head.rotation.y += 22 * Math.exp(-0.9 * t) * dt;
+      r.torso.rotation.z = Math.sin(t * 3.2) * 0.16 * sway;
+      r.torso.rotation.x = Math.sin(t * 2.1) * 0.08 * sway;
+      r.stars.rotation.y += 5 * dt;
+      r.stars.visible = t < 5;
+      if (t < 4.5) r.eye.emissiveIntensity = 0.6 + Math.abs(Math.sin(t * 5)) * 1.6;
+      else if (!r.dead) eyesOff(r);
+      break;
+    }
+
+    case 'apart': {                                  // se desmonta: cabeza y brazos al suelo
+      p.y += (0 - p.y) * k;
+      r.torso.position.y += (0.12 - r.torso.position.y) * k;   // el cuerpo se viene abajo
+      const floorY = -r.torso.position.y;
+      for (const pc of r.pieces) {
+        const o = pc.obj, rest = floorY + pc.rest;
+        if (!pc.landed) {
+          o.position.addScaledVector(pc.vel, dt);
+          pc.vel.y -= profile.gravity * dt;
+          o.rotation.x += pc.spin.x * dt; o.rotation.y += pc.spin.y * dt; o.rotation.z += pc.spin.z * dt;
+          if (o.position.y <= rest && pc.vel.y < 0) {
+            o.position.y = rest;
+            pc.vel.y *= -0.3; pc.vel.x *= 0.5; pc.vel.z *= 0.5; pc.spin.multiplyScalar(0.4);
+            if (pc.vel.y < 0.6) pc.landed = true;
+          }
+        } else {                                     // asentarse en el suelo
+          o.position.y = rest;
+          o.rotation.x += (pc.restRot.x - o.rotation.x) * k;
+          o.rotation.z += (pc.restRot.z - o.rotation.z) * k;
+        }
+      }
+      if (t > 1.2 && !r.dead) { eyesOff(r); sparks(p.x, 0.5, p.z, 4); }
+      break;
+    }
+
+    case 'beetle': {                                 // resbala hacia atrás y cae de espaldas
+      if (r.slide > 0.05) {
+        const bx = -Math.sin(r.g.rotation.y) * r.slide * dt, bz = -Math.cos(r.g.rotation.y) * r.slide * dt;
+        _probe.setFromCenterAndSize(_probeC.set(p.x + bx, 0.55, p.z + bz), _probeS);
+        if (wallBoxes.some(b => b.intersectsBox(_probe))) r.slide = 0;
+        else { p.x += bx; p.z += bz; r.slide *= Math.exp(-4 * dt); }
+      }
+      const s = Math.min(1, t / 0.55), e = s * s * (3 - 2 * s);
+      r.g.rotation.x = -e * Math.PI / 2;
+      p.y = e * 0.3;
+      if (s >= 1 && !r.dead) { eyesOff(r); smokePuff(p.x, 0.3, p.z); }
+      const kick = t > 0.5 && t < 4.5 ? Math.sin(t * 16) * 0.45 : 0;    // pataleo de las orugas
+      r.treads[0].rotation.x = kick;
+      r.treads[1].rotation.x = -kick;
+      break;
+    }
+  }
+  if (t > OFF_TIME) {
+    r.state = 'fade'; r.t = 0;
+    for (const m of r.mats) m.transparent = true;
+  }
+}
+
+// Lingote en vuelo contra un robot: la altura relativa del impacto elige el fallo.
+const BAR_HIT = { reach: 0.42, head: 0.8, body: 0.2, slide: 1.5 };
+function thrownBarHits() {
+  for (const pr of props) {
+    if (!pr.thrown) continue;
+    // sigue valiendo mientras resbala por el suelo, hasta que casi se para
+    if (pr.carried || (pr.grounded && Math.hypot(pr.vel.x, pr.vel.z) < BAR_HIT.slide)) { pr.thrown = false; continue; }
+    const bp = pr.mesh.position;
+    for (const r of robots) {
+      if (!zappable(r)) continue;
+      const rp = r.g.position, h = bp.y - rp.y;
+      if (h < -0.1 || h > 1.35 || Math.hypot(bp.x - rp.x, bp.z - rp.z) > BAR_HIT.reach) continue;
+      stopRobot(r, h > BAR_HIT.head ? 'dizzy' : h > BAR_HIT.body ? 'apart' : 'beetle');
+      pr.vel.x *= -0.25; pr.vel.z *= -0.25;          // rebota y cae junto al robot
+      pr.thrown = false;
+      break;
+    }
+  }
+}
+
+function updateRobots(dt) {
+  if (!raid.active && secondVault.open) { raid.active = true; raid.timer = 4; }
+  crowbarContact(dt);
+  thrownBarHits();
+  if (raid.active && goldLeft > 0) {
+    raid.timer -= dt;
+    if (raid.timer <= 0) {
+      const active = robots.filter(r => r.state !== 'off' && r.state !== 'fade').length;
+      if (active < ROBOT.maxActive && spawnRobot()) raid.timer = 6 + Math.random() * 6;
+      else raid.timer = 1.5;
+    }
+  }
+
+  for (const r of [...robots]) {
+    r.t += dt;
+    const p = r.g.position;
+    switch (r.state) {
+      case 'emerge':                                   // el agujero se abre y el robot sube
+        if (r.t > 0.4) p.y = Math.min(0, p.y + ROBOT.depth / 0.8 * dt);
+        if (p.y >= 0) { r.state = 'go'; r.t = 0; }
+        break;
+      case 'go':
+        if (moveRobotTo(r, r.route.x, r.route.z, dt)) { r.state = 'load'; r.t = 0; }
+        break;
+      case 'load':
+        turnRobotTo(r, r.route.face, dt, 8);
+        if (r.t >= ROBOT.loadTime) {
+          const pal = r.route.pallet;
+          if (pal.bars.length) {
+            goldMesh.setMatrixAt(pal.bars.pop(), _zeroM);
+            goldMesh.instanceMatrix.needsUpdate = true;
+            goldLeft--;
+            r.carrying = true; r.bar.visible = true;
+          }
+          r.state = 'back'; r.t = 0;
+        }
+        break;
+      case 'back':
+        if (moveRobotTo(r, r.hole.x, r.hole.z, dt)) { r.state = 'sink'; r.t = 0; }
+        break;
+      case 'sink':
+        p.y -= ROBOT.depth / 0.9 * dt;
+        if (p.y <= -ROBOT.depth) {
+          if (r.carrying) { raid.stolen++; toast = 'Un robot ha escapado con un lingote'; toastT = 1.8; }
+          r.hole.busy = false;
+          removeRobot(r);
+        }
+        break;
+      case 'off':
+        updateStopped(r, dt);
+        break;
+      case 'fade':
+        for (const m of r.mats) m.opacity = Math.max(0, 1 - r.t / 1.5);
+        if (r.t >= 1.5) removeRobot(r);
+        break;
+    }
+  }
+
+  // Agujeros: se abren mientras están ocupados y se cierran al quedar libres.
+  for (const h of holes) {
+    h.open += ((h.busy ? 1 : 0) - h.open) * (1 - Math.exp(-6 * dt));
+    h.g.scale.setScalar(Math.max(0.001, h.open));
+    h.g.visible = h.open > 0.01;
+  }
+  updateFx(dt);
+}
+
+/* ============================================================================
+   TIEMPO DE JUEGO, PALANCA DE GAME OVER Y ESTADÍSTICAS DE LA PARTIDA
+   El tiempo de juego suma el dt de cada frame (no corre con la pestaña oculta).
+   Cada bloqueo de robot queda en `blockLog` con su instante; al final se
+   calculan las mejores rachas en ventanas deslizantes de 1, 2, 3, 5, 8, 13…
+   minutos (Fibonacci) hasta cubrir el tiempo total de la partida.
+   ========================================================================== */
+let gameTime = 0;
+let inputLocked = false, gameOver = false;
+const blockLog = [];                                 // { t, kind: 'zap' | 'crowbar' | 'bar' }
+
+function fmtTime(sec) {
+  const s = Math.floor(sec), h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60, ss = s % 60;
+  const p2 = n => String(n).padStart(2, '0');
+  return h ? `${h}:${p2(m)}:${p2(ss)}` : `${m}:${p2(ss)}`;
+}
+
+// Palanca en la pared del fondo (este) del ramal de salida, la segunda sala de
+// la salida de servicio, tras el portón al exterior; el cartel va encima.
+const LEVER = { x: 26.4, z: 4.4, range: 1.6, up: 0.35, down: 2.55, pullTime: 0.7 };
+const lever = (() => {
+  const g = new THREE.Group();
+  g.position.set(LEVER.x, 0, LEVER.z);
+  g.rotation.y = -Math.PI / 2;                       // el frente (+Z local) mira al oeste
+  scene.add(g);
+  const plate = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.5, 0.08),
+    new THREE.MeshStandardMaterial({ color: 0xf0c419, roughness: 0.6 }));
+  plate.position.set(0, 1.05, 0.04);
+  const slot = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.36, 0.02), matDark);
+  slot.position.set(0, 1.05, 0.09);
+  const pivot = new THREE.Group();
+  pivot.position.set(0, 1.05, 0.1);
+  pivot.rotation.x = LEVER.up;
+  const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.45, 10), matSteel);
+  arm.position.y = 0.225;
+  const knob = new THREE.Mesh(new THREE.SphereGeometry(0.065, 16, 12),
+    new THREE.MeshStandardMaterial({ color: 0xe0242a, roughness: 0.35, emissive: 0x400000 }));
+  knob.position.y = 0.46;
+  pivot.add(arm, knob);
+
+  // Cartel "GAME OVER" en pixel; se redibuja cuando carga la fuente.
+  const c = document.createElement('canvas');
+  c.width = 512; c.height = 128;
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.magFilter = THREE.NearestFilter;
+  const draw = () => {
+    const x = c.getContext('2d');
+    x.fillStyle = '#07070b'; x.fillRect(0, 0, 512, 128);
+    x.fillStyle = '#ff3b3b';
+    for (let i = 0; i < 512; i += 16) { x.fillRect(i, 0, 8, 6); x.fillRect(i + 8, 122, 8, 6); }  // bombillas
+    x.font = '44px "Press Start 2P", monospace';
+    x.textAlign = 'center'; x.textBaseline = 'middle';
+    x.fillStyle = '#5a0000'; x.fillText('GAME OVER', 260, 70);
+    x.fillStyle = '#ff3b3b'; x.fillText('GAME OVER', 256, 66);
+    tex.needsUpdate = true;
+  };
+  draw();
+  document.fonts?.load('44px "Press Start 2P"').then(draw).catch(() => {});
+  const frame = new THREE.Mesh(new THREE.BoxGeometry(1.95, 0.56, 0.06), matDark);
+  frame.position.set(0, 2.45, 0.03);
+  const sign = new THREE.Mesh(new THREE.PlaneGeometry(1.85, 0.46),
+    new THREE.MeshStandardMaterial({ map: tex, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 0.9 }));
+  sign.position.set(0, 2.45, 0.065);
+  g.add(plate, slot, pivot, frame, sign);
+  g.traverse(o => { if (o.isMesh) o.castShadow = true; });
+  return { g, pivot, pulling: false, t: 0 };
+})();
+
+const nearLever = () => !inputLocked &&
+  Math.hypot(player.position.x - LEVER.x, player.position.z - LEVER.z) < LEVER.range;
+
+function pullLever() {
+  if (inputLocked) return;
+  inputLocked = true;
+  lever.pulling = true; lever.t = 0;
+  for (const k in keys) keys[k] = false;
+  joy.x = joy.y = 0;
+  toast = 'GAME OVER'; toastT = 5;
+}
+
+function updateLever(dt) {
+  if (!lever.pulling) return;
+  lever.t += dt;
+  const s = Math.min(1, lever.t / LEVER.pullTime), e = s * s * (3 - 2 * s);
+  lever.pivot.rotation.x = LEVER.up + (LEVER.down - LEVER.up) * e;
+  if (s >= 1 && !gameOver) endGame();
+}
+
+// Mejor racha: máximo de eventos en una ventana deslizante de `w` segundos.
+function bestWindow(times, w) {
+  let best = 0, start = 0;
+  for (let i = 0, j = 0; j < times.length; j++) {
+    while (times[j] - times[i] >= w) i++;
+    if (j - i + 1 > best) { best = j - i + 1; start = times[i]; }
+  }
+  return { best, start };
+}
+
+function fibWindows(total) {
+  const out = [];
+  for (let a = 1, b = 2; a * 60 < total; [a, b] = [b, a + b]) out.push(a);
+  return out;
+}
+
+function gameStats() {
+  const times = { all: blockLog.map(e => e.t) };
+  for (const k of ['zap', 'crowbar', 'bar']) times[k] = blockLog.filter(e => e.kind === k).map(e => e.t);
+  const rows = fibWindows(gameTime).map(m => ({
+    label: `${m} MIN`, w: m * 60,
+    cells: Object.fromEntries(Object.entries(times).map(([k, ts]) => [k, bestWindow(ts, m * 60)])),
+  }));
+  rows.push({ label: 'PARTIDA', w: gameTime,
+    cells: Object.fromEntries(Object.entries(times).map(([k, ts]) => [k, { best: ts.length, start: 0 }])) });
+  return { rows, total: blockLog.length };
+}
+
+function endGame() {
+  gameOver = true;
+  document.exitPointerLock?.();
+  for (const id of ['hud', 'zone', 'prompt', 'minimap', 'hint', 'ui'])
+    document.getElementById(id).style.display = 'none';
+
+  const k = raid.byKind, f = raid.byFail, { rows, total } = gameStats();
+  const perMin = gameTime > 0 ? (total / (gameTime / 60)).toFixed(1) : '0.0';
+  const card = (n, label, cls = '') => `<div class="go-card ${cls}"><b>${n}</b><span>${label}</span></div>`;
+  const cell = (c, w) => c.best
+    ? `${c.best}${w < gameTime ? `<small>${fmtTime(c.start)}–${fmtTime(Math.min(c.start + w, gameTime))}</small>` : ''}`
+    : '<span class="go-zero">0</span>';
+
+  document.getElementById('goStats').innerHTML = `
+    <div class="go-time"><span>TIEMPO DE JUEGO</span><b>${fmtTime(gameTime)}</b></div>
+    <h2>ROBOTS</h2>
+    <div class="go-grid">
+      ${card(total, 'bloqueados', 'hot')}
+      ${card(k.zap, 'desconectados')}
+      ${card(k.crowbar, 'palanquetazos')}
+      ${card(k.bar, 'lingotazos')}
+      ${card(raid.spawned, 'aparecidos')}
+      ${card(perMin, 'bloqueos / min')}
+    </div>
+    <h2>LINGOTES</h2>
+    <div class="go-grid">
+      ${card(raid.saved, 'salvados', 'gold')}
+      ${card(raid.stolen, 'robados')}
+      ${card(goldLeft.toLocaleString('es-ES'), 'en custodia')}
+    </div>
+    <h2>GOLPES</h2>
+    <div class="go-split">
+      <p><em>PALANQUETA</em> frente ${f.short} · salto ${f.spring} · giro ${f.spin}</p>
+      <p><em>LINGOTE</em> cabeza ${f.dizzy} · cuerpo ${f.apart} · orugas ${f.beetle}</p>
+    </div>
+    <h2>MEJORES RACHAS</h2>
+    <p class="go-note">Máximo de robots bloqueados en cualquier tramo de N minutos.</p>
+    <div class="go-table-wrap"><table>
+      <thead><tr><th>TRAMO</th><th>TOTAL</th><th>DESCON.</th><th>PALANQ.</th><th>LINGOT.</th></tr></thead>
+      <tbody>${rows.map(r => `<tr${r.label === 'PARTIDA' ? ' class="go-total"' : ''}><td>${r.label}</td>` +
+        ['all', 'zap', 'crowbar', 'bar'].map(c => `<td>${cell(r.cells[c], r.w)}</td>`).join('') + '</tr>').join('')}
+      </tbody>
+    </table></div>`;
+  document.getElementById('gameover').hidden = false;
+}
+document.getElementById('goRestart').addEventListener('click', () => location.reload());
+
+/* ============================================================================
+   ZONAS Y MINIMAPA
+   ========================================================================== */
+const ZONES = [
+  ['Cámara principal del oro', -10.4, -7.4, 10.4, 7.4],
+  ['Pasillo perimetral',       -14.5, -11.5, 14.5, 11.5],
+  ['Antesala de entrada',      -40, -23.4, -36, -19.6],
+  ['Acceso principal',         -42, -20.8, -34, -11.9],
+  ['Control y vigilancia',     -42, -11.9, -34, -3.6],
+  ['Corredor de acceso',       -34, -15.6, -25.7, -12.4],
+  ['Vestíbulo blindado',       -25.7, -16.8, -19, -10.4],
+  ['Recodo de seguridad',      -23.5, -10.4, -16.1, 1.6],
+  ['Galería de descenso',      -19.8, 1.6, -16.1, 13.1],
+  ['Pozo / foso de seguridad', -19.8, 13.1, 16.1, 19.6],
+  ['Salida de servicio',       16.1, 0.8, 27, 7.4],
+];
+function zoneAt(x, z) {
+  for (const [n, x0, z0, x1, z1] of ZONES)
+    if (x >= x0 && x <= x1 && z >= z0 && z <= z1) return n;
+  return 'Hormigón armado';
+}
+
+const mm = document.getElementById('minimap');
+const mmCtx = mm.getContext('2d');
+const MM = { x0: -45, z0: -26, x1: 29, z1: 22 };
+const mmS = Math.min(mm.width / (MM.x1 - MM.x0), mm.height / (MM.z1 - MM.z0));
+const mmX = x => (x - MM.x0) * mmS, mmZ = z => (z - MM.z0) * mmS;
+const mmStatic = document.createElement('canvas');
+mmStatic.width = mm.width; mmStatic.height = mm.height;
+(function drawStaticMinimap() {
+  const g = mmStatic.getContext('2d');
+  g.fillStyle = '#0b0e13'; g.fillRect(0, 0, mm.width, mm.height);
+  for (const f of mapFloors) {
+    g.fillStyle = '#2c3545';
+    g.fillRect(mmX(f.x0), mmZ(f.z0), (f.x1 - f.x0) * mmS, (f.z1 - f.z0) * mmS);
+  }
+  g.fillStyle = '#c9a227';
+  g.fillRect(mmX(-10.4), mmZ(-7.4), 20.8 * mmS, 14.8 * mmS);
+  for (const w of mapWalls) {
+    g.fillStyle = '#76889e';
+    g.fillRect(mmX(w.x0), mmZ(w.z0), Math.max(1, (w.x1 - w.x0) * mmS), Math.max(1, (w.z1 - w.z0) * mmS));
+  }
+})();
+
+function drawMinimap() {
+  mmCtx.clearRect(0, 0, mm.width, mm.height);
+  mmCtx.drawImage(mmStatic, 0, 0);
+  for (const o of openables) {
+    if (o.outerBox) continue;                       // los armarios no van al plano
+    mmCtx.fillStyle = o.open ? '#5fe08a' : '#e8663c';
+    mmCtx.beginPath();
+    mmCtx.arc(mmX(o.center.x), mmZ(o.center.z), 2.6, 0, 6.283);
+    mmCtx.fill();
+  }
+  for (const h of holes) {
+    if (!h.g.visible) continue;
+    mmCtx.fillStyle = '#ff7a2a';
+    mmCtx.fillRect(mmX(h.x) - 2, mmZ(h.z) - 2, 4, 4);
+  }
+  for (const r of robots) {
+    mmCtx.fillStyle = zappable(r) ? '#58d8ff' : '#6b7480';
+    mmCtx.beginPath(); mmCtx.arc(mmX(r.g.position.x), mmZ(r.g.position.z), 2.4, 0, 6.283); mmCtx.fill();
+  }
+  const px = mmX(player.position.x), pz = mmZ(player.position.z);
+  mmCtx.strokeStyle = '#fff'; mmCtx.lineWidth = 1.4;
+  mmCtx.beginPath();
+  mmCtx.moveTo(px, pz);
+  mmCtx.lineTo(px + Math.sin(player.rotation.y) * 8, pz + Math.cos(player.rotation.y) * 8);
+  mmCtx.stroke();
+  mmCtx.fillStyle = '#ff5a3c';
+  mmCtx.beginPath(); mmCtx.arc(px, pz, 3.2, 0, 6.283); mmCtx.fill();
+}
+
+/* ============================================================================
+   BUCLE PRINCIPAL
+   ========================================================================== */
+const clock = new THREE.Clock();
+const desiredPos = new THREE.Vector3();
+const hud = document.getElementById('hud');
+const zoneEl = document.getElementById('zone');
+const promptEl = document.getElementById('prompt');
+const _sunOff = new THREE.Vector3(9, 18, 7);
+
+function robotStats() {
+  const k = raid.byKind, f = raid.byFail;
+  return `\nrobados: ${raid.stolen} · salvados: ${raid.saved}` +
+    `\ndesconectados: ${k.zap} · palanquetazos: ${k.crowbar} · lingotazos: ${k.bar}` +
+    (k.crowbar ? `\n  palanqueta → frente ${f.short} · salto ${f.spring} · giro ${f.spin}` : '') +
+    (k.bar ? `\n  lingote → cabeza ${f.dizzy} · cuerpo ${f.apart} · orugas ${f.beetle}` : '');
+}
+
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 0.05);
+  if (gameOver) { renderer.render(scene, camera); return; }   // todo congelado tras el GAME OVER
+  gameTime += dt;
+
+  updateLever(dt);
+  updatePlayer(dt);
+  updateProps(dt);
+  updateOpenables(dt);
+  updateRobots(dt);
+
+  // El shadow map sigue al personaje: un solo mapa nítido en un mapa grande.
+  sun.position.copy(player.position).add(_sunOff);
+  sun.target.position.copy(player.position);
+  sun.target.updateMatrixWorld();
+
+  if (camState.recentering) {
+    camState.recenterT += dt / profile.recenterDuration;
+    if (camState.recenterT >= 1) { camState.recenterT = 1; camState.recentering = false; }
+    const e = camState.recenterT * camState.recenterT * (3 - 2 * camState.recenterT);
+    camState.yaw = THREE.MathUtils.lerp(camState.recenterFrom, camState.recenterTo, e);
+  }
+  if (camMode === 'orbit' && !userRotating && !camState.recentering) camState.yaw += 0.25 * dt;
+
+  followTarget.copy(player.position); followTarget.y += 1.4;
+  smoothedTarget.lerp(followTarget, 1 - Math.exp(-profile.followSmoothness * dt));
+
+  const cp = Math.cos(camState.pitch), sp = Math.sin(camState.pitch);
+  desiredPos.set(
+    smoothedTarget.x + camState.preferredDistance * cp * Math.sin(camState.yaw),
+    smoothedTarget.y + camState.preferredDistance * sp,
+    smoothedTarget.z + camState.preferredDistance * cp * Math.cos(camState.yaw));
+
+  const allowed = resolveCameraDistance(smoothedTarget, desiredPos);
+  const kZoom = 1 - Math.exp(-(allowed < camState.actualDistance ? 30 : profile.zoomSmoothness) * dt);
+  camState.actualDistance += (Math.min(allowed, camState.preferredDistance) - camState.actualDistance) * kZoom;
+
+  camera.position.set(
+    smoothedTarget.x + camState.actualDistance * cp * Math.sin(camState.yaw),
+    smoothedTarget.y + camState.actualDistance * sp,
+    smoothedTarget.z + camState.actualDistance * cp * Math.cos(camState.yaw));
+  camera.lookAt(smoothedTarget);
+  updateWallFading(dt);
+
+  // --- Interfaz ---
+  zoneEl.textContent = zoneAt(player.position.x, player.position.z);
+  const near = nearestOpenable();
+  const nearBot = robotTool() ? nearestRobot() : null;
+  if (toastT > 0) {
+    toastT -= dt;
+    promptEl.style.display = 'block';
+    promptEl.textContent = toast;
+  } else if (nearBot) {
+    promptEl.style.display = 'block';
+    promptEl.textContent = (carriedProp === zapper ? '[Q] Desconectar robot'
+      : 'Palanqueta: tócalo de frente, salta encima o gira al pasar') +
+      (nearBot.carrying ? ' (lleva un lingote)' : '');
+  } else if (nearLever()) {
+    promptEl.style.display = 'block';
+    promptEl.textContent = '[F] Tirar de la palanca · GAME OVER (termina la partida)';
+  } else if (near) {
+    promptEl.style.display = 'block';
+    promptEl.textContent = `[F] ${near.open ? 'Cerrar' : 'Abrir'} · ${near.label}`;
+  } else {
+    promptEl.style.display = 'none';
+  }
+
+  hud.textContent =
+    `tiempo de juego: ${fmtTime(gameTime)}\n` +
+    `cámara: ${camMode === 'tpp' ? 'TPP' : 'ÓRBITA'}\n` +
+    `pos: ${player.position.x.toFixed(1)}, ${player.position.y.toFixed(1)}, ${player.position.z.toFixed(1)}\n` +
+    `dist real: ${camState.actualDistance.toFixed(2)} m` +
+    (camState.actualDistance < camState.preferredDistance - 0.05 ? '  [colisión]' : '') +
+    `\nlingotes en custodia: ${goldLeft}` +
+    (raid.active ? robotStats() : '') +
+    (carriedProp ? `\nllevas: ${carriedProp.name}  [E para soltar]` : '');
+
+  drawMinimap();
+  renderer.render(scene, camera);
+}
+animate();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>
